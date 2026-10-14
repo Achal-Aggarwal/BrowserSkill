@@ -154,7 +154,7 @@ bsk session stop <id>
 
 ## DeepSeek Harness 插件
 
-[DSH 插件](packages/dsh-plugin-browserskill/README.md) 在 DeepSeek Harness Web UI 中提供原生 `browser_*` 工具、浏览器任务预览和截图结果。它使用同一套 `bsk` CLI 与扩展，并自带 BrowserSkill skill。
+[DSH 插件](packages/dsh-plugin-browserskill/README.md) 在 DeepSeek Harness Web UI 中提供原生 `bsk_*` 工具、浏览器任务预览和截图结果。它使用同一套 `bsk` CLI 与扩展，并自带 BrowserSkill skill。
 
 安装好 DeepSeek Harness、pnpm 和 `bsk`，连接扩展后，将插件加入你的 profile：
 

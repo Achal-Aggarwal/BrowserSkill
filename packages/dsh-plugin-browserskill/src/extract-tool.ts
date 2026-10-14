@@ -100,7 +100,7 @@ export function registerExtractTool(
           if (!value || !Array.isArray(value.fields))
             throw new Error("extractFields must contain a fields array");
         }
-        const sessionId = deps.registry.resolve(args.session, "browser_inspect(action=extract)");
+        const sessionId = deps.registry.resolve(args.session, "bsk_inspect(action=extract)");
         const command = ["extract", kind, "--session", sessionId];
         appendTabId(command, args.tabId);
         for (const [value, flag] of [

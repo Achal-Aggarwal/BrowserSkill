@@ -186,12 +186,12 @@ allows a consumer to detect a mismatched pair.
 
 ## DSH plugin
 
-The existing **browser_inspect** tool gains **action: "extract"**:
+The existing **bsk_inspect** tool gains **action: "extract"**:
 
 ~~~text
-browser_inspect({ action: "extract", session: "<id>", extractKind: "discover" })
-browser_inspect({ action: "extract", session: "<id>", extractKind: "table", extractTarget: "<target_id>" })
-browser_inspect({ action: "extract", session: "<id>", extractKind: "table", selector: "#orders",
+bsk_inspect({ action: "extract", session: "<id>", extractKind: "discover" })
+bsk_inspect({ action: "extract", session: "<id>", extractKind: "table", extractTarget: "<target_id>" })
+bsk_inspect({ action: "extract", session: "<id>", extractKind: "table", selector: "#orders",
   extractFormat: "csv", output: "/absolute/path/orders.csv", csvSafe: true })
 ~~~
 
@@ -203,8 +203,8 @@ requires an output path so the plugin always receives structured JSON. The plugi
 normal session registry, runner and queue; it does not introduce arbitrary
 page-script evaluation. Output paths are on the CLI host; relative paths resolve
 against that process's working directory. Prefer absolute paths in harness calls.
-Extraction shares browser_inspect's output parameter with debug export and video
-save. Its model guidance lives in the browser_inspect description and parameter
+Extraction shares bsk_inspect's output parameter with debug export and video
+save. Its model guidance lives in the bsk_inspect description and parameter
 schema rather than a separate DSH skill reference, keeping the DSH skill entry
 within its 4,500-byte budget in both LF and CRLF checkouts.
 

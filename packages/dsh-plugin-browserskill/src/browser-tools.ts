@@ -7,7 +7,9 @@
 
 import { defineTool, type ParameterSchemaSpec, type ToolDefinition } from "@deepseek-ai/dsh-tools";
 import { DEBUG_PARAMETERS } from "./debug-tool";
+import { disposeAll } from "./disposables";
 import { EXTRACT_PARAMETERS } from "./extract-tool";
+import toolNames from "./tool-names.json";
 import {
   BROWSER_PARAM,
   ELEMENT_WAIT_PARAMS,
@@ -116,7 +118,7 @@ function defineBrowserTool(
 
 const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
   {
-    name: "browser_session",
+    name: toolNames.session,
     description:
       "Manage plugin-owned browser sessions. Actions: start opens an Agent Window; stop closes an " +
       "owned session; list returns owned sessions. For start, url/device/width/height/noFocus are " +
@@ -142,7 +144,7 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
     },
   },
   {
-    name: "browser_page",
+    name: toolNames.page,
     description:
       "Navigate and wait on the active Agent Window tab. Actions: navigate, back, forward, reload, " +
       "wait, wait-for-element. navigate requires url; reload optionally accepts hard; navigation " +
@@ -168,7 +170,7 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
     },
   },
   {
-    name: "browser_inspect",
+    name: toolNames.inspect,
     description:
       "Inspect page state and explicitly control task-scoped debugging. Actions: observe, snapshot, html, " +
       "screenshot, console, network, video, extract. video with videoAction starts/stops a requested recording, checks status, lists, saves or discards MP4 artifacts. Start video before task operations and stop before session teardown. " +
@@ -213,7 +215,7 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
     },
   },
   {
-    name: "browser_interact",
+    name: toolNames.interact,
     description:
       "Interact with the active Agent Window tab. Actions: click, hover, wheel, scroll-to, focus, blur, fill, select, " +
       "press. click/hover/scroll-to/focus/blur/fill/select require target; fill also requires value; select requires " +
@@ -268,7 +270,7 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
     },
   },
   {
-    name: "browser_tabs",
+    name: toolNames.tabs,
     description:
       "Manage tabs visible to an owned session. Actions: list, create, select, close, borrow, return. " +
       "select/close/borrow/return require tabId from list/create. Borrow moves a user tab into the " +
@@ -295,7 +297,7 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
     },
   },
   {
-    name: "browser_assist",
+    name: toolNames.assist,
     description:
       "Display and human-assistance operations. Actions: resize, emulate, request-help. resize " +
       "requires width/height; emulate accepts device or width/height/mobile, or off alone; " +
@@ -397,13 +399,26 @@ function indexOperations(definitions: ToolDefinition[]): ReadonlyMap<string, Too
   return indexed;
 }
 
-/** Register the complete six-tool browser suite; returns its combined disposer. */
+/** Register all six tools or roll back this attempt; never remove foreign entries. */
 export function registerBrowserTools(deps: ToolDeps): () => void {
-  const definitions = indexOperations(createBrowserOperationDefinitions(deps));
-  const disposers = BROWSER_TOOL_SPECS.map((spec) =>
-    deps.ctx.tools.register(defineBrowserTool(spec, definitions)),
-  ).filter((dispose): dispose is () => void => typeof dispose === "function");
-  return () => {
-    for (const dispose of disposers.splice(0)) dispose();
-  };
+  const operations = indexOperations(createBrowserOperationDefinitions(deps));
+  // Validate every definition before publishing any schema. The host emits
+  // changes per registration; this is rollback, not an atomic registry update.
+  const definitions = BROWSER_TOOL_SPECS.map((spec) => defineBrowserTool(spec, operations));
+  const disposers: (() => void)[] = [];
+  for (const definition of definitions) {
+    try {
+      disposers.push(deps.ctx.tools.register(definition));
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      const failure = new Error(`Failed to register ${definition.name}: ${detail}`, { cause });
+      try {
+        disposeAll(disposers);
+      } catch (cleanupError) {
+        throw new AggregateError([failure, cleanupError], failure.message, { cause });
+      }
+      throw failure;
+    }
+  }
+  return () => disposeAll(disposers);
 }

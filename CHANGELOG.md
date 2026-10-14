@@ -7,6 +7,15 @@ Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking — DSH Plugin:** replace `browser_session`, `browser_page`,
+  `browser_inspect`, `browser_interact`, `browser_tabs`, and `browser_assist` with
+  the corresponding `bsk_*` names to coexist with other browser plugins.
+  Actions, arguments, results, and the `browser-skill` skill name are unchanged.
+  Update hardcoded calls and tool policies, restart the host, and reload the skill
+  in existing conversations. See the [migration guide](packages/dsh-plugin-browserskill/README.md#breaking-tool-api-migration-unreleased).
+
 ### Fixed
 
 - CLI: argument parsing failures now honor `--json`, returning an
@@ -15,6 +24,11 @@ Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
   explains that it belongs after a supporting subcommand, replacing the
   misleading `--version` suggestion and usage line
   ([#387](https://github.com/Tencent/BrowserSkill/issues/387)).
+- DSH Plugin: roll back incomplete tool registration, surface activation failures,
+  and retry at skill/session lifecycle boundaries without leaving a partial suite.
+  Include tool schemas in the first `/browser-skill` request, and keep failure and
+  recovery notices synchronized with model skill results
+  ([#444](https://github.com/Tencent/BrowserSkill/issues/444)).
 - Extension: input to a background Agent Window tab no longer keeps failing with
   `input_not_ready` after Chrome drops the session's focus override without a detach
   ([#355](https://github.com/Tencent/BrowserSkill/issues/355)). The session's

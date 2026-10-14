@@ -154,7 +154,7 @@ In WorkBuddy/CodeBuddy, or hosts that reap command children, the agent should re
 
 ## DeepSeek Harness plugin
 
-The [DSH plugin](packages/dsh-plugin-browserskill/README.md) adds native `browser_*` tools, browser task previews, and screenshot results to the DeepSeek Harness Web UI. It uses the same `bsk` CLI and extension and includes its own BrowserSkill skill.
+The [DSH plugin](packages/dsh-plugin-browserskill/README.md) adds native `bsk_*` tools, browser task previews, and screenshot results to the DeepSeek Harness Web UI. It uses the same `bsk` CLI and extension and includes its own BrowserSkill skill.
 
 With DeepSeek Harness, pnpm, and `bsk` installed and the extension connected, add the plugin to your profile:
 

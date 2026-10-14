@@ -4,7 +4,7 @@
 
 Use [BrowserSkill](https://github.com/Tencent/BrowserSkill) in
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) to browse
-websites, fill forms, and capture screenshots through native `browser_*` tools.
+websites, fill forms, and capture screenshots through native `bsk_*` tools.
 Browser tasks run in Agent Windows, with a live view in the dsh Web UI.
 
 ## Installation
@@ -54,38 +54,81 @@ dsh plugin --profile web update @wxg-prc-cpg/browser-skill-dsh-plugin --latest
 Restart that dsh profile after upgrading. This command updates the plugin; update
 the `bsk` CLI and browser extension separately when a release requires it.
 
+### Breaking tool API migration (unreleased)
+
+The next coordinated release replaces all six `browser_*` tool names with stable
+BrowserSkill-specific names. This avoids collisions with other browser plugins
+such as `dsh-builtin-browser`; both plugins keep their own tools and sessions.
+
+| Previous name | New name |
+| --- | --- |
+| `browser_session` | `bsk_session` |
+| `browser_page` | `bsk_page` |
+| `browser_inspect` | `bsk_inspect` |
+| `browser_interact` | `bsk_interact` |
+| `browser_tabs` | `bsk_tabs` |
+| `browser_assist` | `bsk_assist` |
+
+Actions, parameters, results, and `/browser-skill` are unchanged. The old tool
+names are not registered as aliases. After upgrading, restart the DSH profile and
+invoke `/browser-skill` again in existing conversations to load the new instructions.
+Update hardcoded tool calls, allow/deny lists, and `toolOrder` entries to the new
+names. Do not replay old calls unchanged: another plugin may own those names.
+
+Existing conversation logs and screenshot attachments are left intact. New
+`bsk_inspect` results use the screenshot view; old `browser_inspect` cards may use
+DSH's generic renderer and do not retain the custom thumbnail/preview interaction.
+This migration must ship as a breaking release, with the shared CLI/extension/plugin
+version coordinated by the release process, rather than as a patch to 0.3.2.
+
 ## Tools
 
 | Tool | Actions | Purpose |
 | --- | --- | --- |
-| `browser_session` | `start`, `stop`, `list` | Manage plugin-owned Agent Window sessions. |
-| `browser_page` | `navigate`, `back`, `forward`, `reload`, `wait`, `wait-for-element` | Navigate the active tab; wait for page lifecycle events or one element condition. |
-| `browser_inspect` | `observe`, `snapshot`, `html`, `screenshot`, `console`, `network`, `debug`, `video`, `extract` | Inspect page state, debug websites, capture screenshots or requested task videos, and export structured tables/lists. |
-| `browser_interact` | `click`, `hover`, `wheel`, `scroll-to`, `focus`, `blur`, `fill`, `select`, `press` | Interact with controls using fresh refs or selectors. |
-| `browser_tabs` | `list`, `create`, `select`, `close`, `borrow`, `return` | Manage Agent Window tabs and temporarily borrow user tabs. |
-| `browser_assist` | `resize`, `emulate`, `request-help` | Resize or emulate the browser and pause for human-only steps. |
+| `bsk_session` | `start`, `stop`, `list` | Manage plugin-owned Agent Window sessions. |
+| `bsk_page` | `navigate`, `back`, `forward`, `reload`, `wait`, `wait-for-element` | Navigate the active tab; wait for page lifecycle events or one element condition. |
+| `bsk_inspect` | `observe`, `snapshot`, `html`, `screenshot`, `console`, `network`, `debug`, `video`, `extract` | Inspect page state, debug websites, capture screenshots or requested task videos, and export structured tables/lists. |
+| `bsk_interact` | `click`, `hover`, `wheel`, `scroll-to`, `focus`, `blur`, `fill`, `select`, `press` | Interact with controls using fresh refs or selectors. |
+| `bsk_tabs` | `list`, `create`, `select`, `close`, `borrow`, `return` | Manage Agent Window tabs and temporarily borrow user tabs. |
+| `bsk_assist` | `resize`, `emulate`, `request-help` | Resize or emulate the browser and pause for human-only steps. |
 
-For `browser_page` with `action: "wait-for-element"`, see the
+For `bsk_page` with `action: "wait-for-element"`, see the
 [element-wait reference](skill/references/interaction-details.md#element-waits) for
 supported conditions, timeout results and recovery with existing single actions.
 
 For native wheel input (`action: "wheel"`), see the [wheel reference](../../docs/wheel.md)
 for signed deltas, optional targets, result semantics and interruption.
 
-For `browser_interact` with `action: "scroll-to"`, see the
+For `bsk_interact` with `action: "scroll-to"`, see the
 [scroll-to reference](../../docs/scroll-to.md) for parameters, visible bounds and errors.
 
-For `browser_inspect` with `action: "extract"`, see
+For `bsk_inspect` with `action: "extract"`, see
 [structured extraction](../../docs/structured-extraction.md) for discovery, list
 fields, JSON/CSV output and loaded-DOM completeness.
 
 Arbitrary page-script evaluation and interaction recording are not supported.
 
+### Activation failures
+
+The six tools register as a complete suite. If any registration fails, the plugin
+rolls back that attempt and reports the failing tool through DSH's logger. A model
+invocation of `skill` returns an error instead of claiming successful activation;
+slash-command and restored conversations receive a scoped notice. Unrelated
+conversations continue normally, and repeated identical failures do not flood logs.
+
+Resolve the reported registration error, then invoke `/browser-skill` again or
+start the next turn to retry. Session entry and service discovery also retry a
+pending activation; streaming events do not. The affected conversation receives
+one recovery notice. If the failed model call never delivered the skill body,
+the notice asks the model to load it before using the tools. With `lazyTools: false`,
+a registration failure fails plugin startup and releases its resources; reload
+after fixing it.
+
 ## Multi-session model
 
 One agent conversation can drive several browser sessions at once:
 
-- `browser_session` with `action: start` returns the session id and makes it the **current session**.
+- `bsk_session` with `action: start` returns the session id and makes it the **current session**.
 - Every operation tool accepts an optional `session` argument. When omitted, the call acts on the
   current session (the one most recently started or used); when given, that session becomes current.
 - Every tool result echoes the session it actually acted on, so the model never has to guess.
@@ -93,7 +136,7 @@ One agent conversation can drive several browser sessions at once:
 - Unloading the plugin stops every session it started and kills in-flight bsk processes.
 
 Starts are journaled before creating a window. Lost replies and failed cleanup remain
-recoverable on reload; `browser_session action=list` reports `pendingCleanup`, and stop
+recoverable on reload; `bsk_session action=list` reports `pendingCleanup`, and stop
 can retry it even when there is no current session. This requires a CLI and daemon
 that support recoverable starts. See [the lifecycle contract](../../docs/recoverable-session-starts.md).
 
@@ -108,7 +151,7 @@ until acknowledged and do not occupy browser capacity.
 **Ownership boundary**: the bsk daemon may be shared with other agents, terminals, or dsh
 instances. The plugin therefore only ever sees and operates on sessions it created itself —
 an explicit `session` argument naming a foreign or unknown id is rejected, the `list` action on
-`browser_session` shows plugin-created sessions only (no daemon-wide view), and stop/unload cleanup
+`bsk_session` shows plugin-created sessions only (no daemon-wide view), and stop/unload cleanup
 can never touch a session owned by another program.
 
 ## Configuration
@@ -158,13 +201,14 @@ All fields are optional; omitted fields use the defaults below:
 | `lazyTools` | `true` | Reveal the browser tools when the skill is invoked. Set `false` to register them at startup. |
 
 With `lazyTools: true`, only the skill's catalog entry is initially advertised to
-the model. The six `browser_*` tool schemas are added to the system prompt after
-the `browser-skill` skill is successfully invoked, either by the model or through
-`/browser-skill`. Set `lazyTools: false` to make the tools available immediately.
+the model. A successful model `skill` call makes the six `bsk_*` schemas available
+in the next step. A user `/browser-skill` gesture activates them when the host
+claims the input, before prompt assembly, so the first request includes both the
+skill instructions and tool schemas. Set `lazyTools: false` to register at startup.
 
 After a plugin reload, a live or resumed conversation's successful skill invocation
 restores the tools from its stored history. If an older plugin reports
-`unknown tool "browser_session"`, invoke `skill browser-skill` again, or set
+`unknown tool "bsk_session"`, invoke `skill browser-skill` again, or set
 `lazyTools: false` in the profile patch as a temporary workaround.
 
 ## Live browser view
@@ -267,7 +311,7 @@ tab, confirms recording is active, performs the task, then stops video before
 ending the session. No manual Start click is required. Preview and Save As are in
 the extension's Features → Video recording → Recent recordings.
 
-`browser_inspect` with `action: "video"` exposes `videoAction` start/status/stop/save/
+`bsk_inspect` with `action: "video"` exposes `videoAction` start/status/stop/save/
 list/discard. The default is a silent, fixed-tab MP4 with a 60-second limit (up to
 10 minutes). Export requires an explicit `output` path on the harness host; the
 extension's Save As writes on the browser computer. Partial recordings and limits

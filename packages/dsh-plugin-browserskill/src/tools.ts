@@ -43,7 +43,7 @@ export interface PluginConfig {
   thumbnailIntervalMs: number;
   idleIntervalMs: number;
   /**
-   * Lazy tool-schema injection: when true (default), the browser_* tools are
+   * Lazy tool-schema injection: when true (default), the bsk_* tools are
    * registered only after the `browser-skill` skill has been successfully
    * invoked (skill catalog entry advertises alone until then); when false,
    * the suite is registered at apply time (legacy always-on behavior).
@@ -177,7 +177,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       name: "session.start",
       description:
         "Start a new browser session: opens an Agent Window in the connected browser and returns " +
-        "its session id. The new session becomes the current session for subsequent browser_* calls. " +
+        "its session id. The new session becomes the current session for subsequent bsk_* calls. " +
         "Optionally navigate to an initial URL and/or apply a mobile device emulation preset.",
       parameters: {
         url: {
@@ -362,7 +362,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       name: "session.list",
       description:
         "List the browser sessions created by this plugin. Sessions owned by other programs on the " +
-        "shared bsk daemon are not visible here. The session marked `current` is the one browser_* " +
+        "shared bsk daemon are not visible here. The session marked `current` is the one bsk_* " +
         "tools act on when no explicit `session` is passed.",
       parameters: {},
       output: {
@@ -478,7 +478,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       },
       async execute(args, exec) {
         if (args.url.trim().length === 0) throw new Error("url must be a non-empty string");
-        const sessionId = registry.resolve(args.session, "browser_page(action=navigate)");
+        const sessionId = registry.resolve(args.session, "bsk_page(action=navigate)");
         const cmdArgs = ["navigate", "--session", sessionId];
         if (args.waitUntil !== undefined) cmdArgs.push("--wait-until", args.waitUntil);
         if (args.timeoutMs !== undefined) cmdArgs.push("--timeout", `${args.timeoutMs}ms`);
@@ -512,9 +512,9 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
     const name = isSnapshot ? "inspect.snapshot" : "inspect.observe";
     const description = isSnapshot
       ? "Capture an indented aria-tree snapshot of the session's active tab. Interactive elements " +
-        "carry @eN refs for browser_interact actions. Prefer browser_inspect action=observe for a richer semantic view."
+        "carry @eN refs for bsk_interact actions. Prefer bsk_inspect action=observe for a richer semantic view."
       : "Produce a semantic VOM observation of the session's active tab (roles, states, perception " +
-        "probes) with @eN refs for browser_interact actions. Read-only: never submits input.";
+        "probes) with @eN refs for bsk_interact actions. Read-only: never submits input.";
     register(
       defineTool({
         name,
@@ -602,7 +602,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       name: "interact.click",
       description:
         "Click an element in the session's active tab. Target is a snapshot ref (@e3) from the " +
-        "last browser_inspect observation, or a CSS selector.",
+        "last bsk_inspect observation, or a CSS selector.",
       parameters: {
         target: {
           type: "string",
@@ -650,7 +650,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       },
       async execute(args, exec) {
         if (args.target.trim().length === 0) throw new Error("target must be a non-empty string");
-        const sessionId = registry.resolve(args.session, "browser_interact(action=click)");
+        const sessionId = registry.resolve(args.session, "bsk_interact(action=click)");
         const cmdArgs = ["click", "--session", sessionId];
         if (args.button !== undefined) cmdArgs.push("--button", args.button);
         if (args.clickCount !== undefined) cmdArgs.push("--click-count", String(args.clickCount));
@@ -728,7 +728,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       },
       async execute(args, exec) {
         if (args.target.trim().length === 0) throw new Error("target must be a non-empty string");
-        const sessionId = registry.resolve(args.session, "browser_interact(action=fill)");
+        const sessionId = registry.resolve(args.session, "bsk_interact(action=fill)");
         const cmdArgs = ["fill", "--session", sessionId, "--value", args.value];
         if (args.noClear === true) cmdArgs.push("--no-clear");
         cmdArgs.push(args.target);
@@ -788,7 +788,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       },
       async execute(args, exec) {
         if (args.key.trim().length === 0) throw new Error("key must be a non-empty string");
-        const sessionId = registry.resolve(args.session, "browser_interact(action=press)");
+        const sessionId = registry.resolve(args.session, "bsk_interact(action=press)");
         const cmdArgs = ["press", "--session", sessionId];
         if (args.target !== undefined) {
           if (args.target.trim().length === 0) throw new Error("target must be a non-empty string");
@@ -891,7 +891,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
       },
       isConcurrencySafe: () => true,
       async execute(args, exec) {
-        const sessionId = registry.resolve(args.session, "browser_inspect(action=screenshot)");
+        const sessionId = registry.resolve(args.session, "bsk_inspect(action=screenshot)");
         const outPath = join(
           tmpdir(),
           `bsk-screenshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`,
@@ -1001,7 +1001,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
         ],
       },
       async execute(args, exec) {
-        const sessionId = registry.resolve(args.session, "browser_assist(action=emulate)");
+        const sessionId = registry.resolve(args.session, "bsk_assist(action=emulate)");
         if (args.off === true) {
           if (args.device !== undefined || args.width !== undefined || args.height !== undefined) {
             throw new Error("off is mutually exclusive with device/width/height");
