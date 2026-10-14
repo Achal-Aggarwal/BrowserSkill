@@ -126,7 +126,9 @@ Once connected, ask your agent:
 Use browser-skill to open https://example.com, summarize the page, and end the browser session when finished.
 ```
 
-The agent should open an Agent Window, read the page, return the summary, and stop its task. Harnesses that support skill slash commands can also use `/browser-skill`.
+The agent opens its own window in the background, reads the page, returns the summary, and stops its task. External links or manually created tabs that land in the task window are moved to your most recently used normal window; a user window is created if none remain. Routing happens after tab creation, so a tab may briefly appear in the task window. Page-opened tabs and human assistance or recording are preserved. Harnesses that support skill slash commands can also use `/browser-skill`.
+
+Chrome can still activate a window when a page opens a native popup. For observed task popups, the extension restores the previous Chrome window or minimized state if you have not switched windows. Chrome's public extension APIs cannot guarantee zero transient activation or restore focus to another application.
 
 <details>
 <summary><b>Try the CLI directly</b></summary>
@@ -134,10 +136,10 @@ The agent should open an Agent Window, read the page, return the summary, and st
 Start a session and keep the returned `session_id`:
 
 ```sh
-bsk session start --no-focus --json
+bsk session start --json
 ```
 
-Replace `<id>` with that value in each command below. With multiple connected browsers, select one using `--browser <instance-id-or-name>` when starting the session.
+Replace `<id>` with that value in each command below. With multiple connected browsers, select one using `--browser <instance-id-or-name>` when starting the session. Background creation is the default; `--no-focus` remains supported, and `--focus` explicitly brings the new window forward. Requests for human help and interactive recording still bring the relevant window forward.
 
 ```sh
 bsk navigate https://example.com --session <id>

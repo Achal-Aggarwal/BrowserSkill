@@ -194,7 +194,8 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
         },
         noFocus: {
           type: "boolean",
-          description: "Open the Agent Window in the background without stealing focus.",
+          description:
+            "Background by default. Set false to explicitly open the Agent Window in front.",
         },
         browser: BROWSER_PARAM,
         device: {
@@ -241,6 +242,7 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
           startArgs.push("--width", String(args.width), "--height", String(args.height));
         }
         if (args.noFocus === true) startArgs.push("--no-focus");
+        if (args.noFocus === false) startArgs.push("--focus");
         if (args.browser !== undefined) startArgs.push("--browser", args.browser);
         let reply: { session_id: string; browser_instance_id: string };
         try {

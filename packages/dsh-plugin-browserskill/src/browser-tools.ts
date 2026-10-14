@@ -138,7 +138,11 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
       url: { type: "string", description: "Initial URL for start." },
       width: { type: "integer", description: "Agent Window width; start requires height too." },
       height: { type: "integer", description: "Agent Window height; start requires width too." },
-      noFocus: { type: "boolean", description: "Start the Agent Window in the background." },
+      noFocus: {
+        type: "boolean",
+        description:
+          "Background by default. Set false to explicitly open the Agent Window in front.",
+      },
       browser: BROWSER_PARAM,
       device: { type: "string", enum: DEVICE_PRESETS, description: "Device preset for start." },
     },

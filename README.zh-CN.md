@@ -126,7 +126,9 @@ bsk doctor
 使用 browser-skill 打开 https://example.com，总结页面内容，完成后结束浏览器会话。
 ```
 
-Agent 应打开代理窗口、读取页面、返回总结，并结束任务。支持 skill 斜杠命令的 Agent，也可以通过 `/browser-skill` 调用。
+Agent 默认在后台打开独立代理窗口、读取页面、返回总结，并结束任务。误入代理窗口的外部链接或手动新建标签会移回最近使用的普通用户窗口；没有用户窗口时会新建一个。分流发生在标签创建之后，可能短暂显示在代理窗口中。页面打开的子标签、人类协助和录制流程会保留。支持 skill 斜杠命令的 Agent，也可以通过 `/browser-skill` 调用。
+
+网页打开原生弹窗时，Chrome 仍可能激活窗口。对于观察到的任务弹窗，若用户没有切换窗口，扩展会恢复之前的 Chrome 用户窗口或最小化状态。Chrome 公开扩展 API 无法保证完全没有瞬时激活，也无法恢复其他应用的焦点。
 
 <details>
 <summary><b>直接试用 CLI</b></summary>
@@ -134,10 +136,10 @@ Agent 应打开代理窗口、读取页面、返回总结，并结束任务。�
 先创建会话，记下返回的 `session_id`：
 
 ```sh
-bsk session start --no-focus --json
+bsk session start --json
 ```
 
-将下面每条命令中的 `<id>` 替换为该值。有多个浏览器连接时，在创建会话时用 `--browser <实例 ID 或名称>` 选择目标。
+将下面每条命令中的 `<id>` 替换为该值。有多个浏览器连接时，在创建会话时用 `--browser <实例 ID 或名称>` 选择目标。默认后台创建，仍兼容 `--no-focus`；显式使用 `--focus` 可将新窗口置于前台。请求人类帮助和交互录制仍会将相关窗口置于前台。
 
 ```sh
 bsk navigate https://example.com --session <id>

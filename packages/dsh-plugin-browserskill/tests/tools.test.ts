@@ -355,6 +355,20 @@ describe("action dispatch", () => {
 });
 
 describe("session.start", () => {
+  it.each([
+    [undefined, undefined],
+    [true, "--no-focus"],
+    [false, "--focus"],
+  ])("maps noFocus=%s to %s", async (noFocus, flag) => {
+    const { tools, calls } = setup({ "session start": START_REPLY("s1") });
+    await tools
+      .get("browser_session")
+      ?.execute({ action: "start", ...(noFocus === undefined ? {} : { noFocus }) }, makeExec());
+    expect(calls[0].args.filter((arg) => arg === "--focus" || arg === "--no-focus")).toEqual(
+      flag ? [flag] : [],
+    );
+  });
+
   it("maps the start reply and tracks the session as current", async () => {
     const { tools, registry } = setup({ "session start": START_REPLY("s1") });
     const value = await startSession(tools);
