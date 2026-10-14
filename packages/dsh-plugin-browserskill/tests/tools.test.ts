@@ -362,7 +362,7 @@ describe("session.start", () => {
   ])("maps noFocus=%s to %s", async (noFocus, flag) => {
     const { tools, calls } = setup({ "session start": START_REPLY("s1") });
     await tools
-      .get("browser_session")
+      .get("bsk_session")
       ?.execute({ action: "start", ...(noFocus === undefined ? {} : { noFocus }) }, makeExec());
     expect(calls[0].args.filter((arg) => arg === "--focus" || arg === "--no-focus")).toEqual(
       flag ? [flag] : [],
