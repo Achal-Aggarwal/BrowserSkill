@@ -59,17 +59,25 @@ the `bsk` CLI and browser extension separately when a release requires it.
 | Tool | Actions | Purpose |
 | --- | --- | --- |
 | `browser_session` | `start`, `stop`, `list` | Manage plugin-owned Agent Window sessions. |
-| `browser_page` | `navigate`, `back`, `forward`, `reload`, `wait` | Navigate the active tab and wait for page lifecycle events. |
-| `browser_inspect` | `observe`, `snapshot`, `html`, `screenshot`, `console`, `network` | Read semantic or diagnostic page state and capture screenshots. |
+| `browser_page` | `navigate`, `back`, `forward`, `reload`, `wait`, `wait-for-element` | Navigate the active tab; wait for page lifecycle events or one element condition. |
+| `browser_inspect` | `observe`, `snapshot`, `html`, `screenshot`, `console`, `network`, `debug`, `video`, `extract` | Inspect page state, debug websites, capture screenshots or requested task videos, and export structured tables/lists. |
 | `browser_interact` | `click`, `hover`, `wheel`, `scroll-to`, `focus`, `blur`, `fill`, `select`, `press` | Interact with controls using fresh refs or selectors. |
 | `browser_tabs` | `list`, `create`, `select`, `close`, `borrow`, `return` | Manage Agent Window tabs and temporarily borrow user tabs. |
 | `browser_assist` | `resize`, `emulate`, `request-help` | Resize or emulate the browser and pause for human-only steps. |
+
+For `browser_page` with `action: "wait-for-element"`, see the
+[element-wait reference](skill/references/interaction-details.md#element-waits) for
+supported conditions, timeout results and recovery with existing single actions.
 
 For native wheel input (`action: "wheel"`), see the [wheel reference](../../docs/wheel.md)
 for signed deltas, optional targets, result semantics and interruption.
 
 For `browser_interact` with `action: "scroll-to"`, see the
 [scroll-to reference](../../docs/scroll-to.md) for parameters, visible bounds and errors.
+
+For `browser_inspect` with `action: "extract"`, see
+[structured extraction](../../docs/structured-extraction.md) for discovery, list
+fields, JSON/CSV output and loaded-DOM completeness.
 
 Arbitrary page-script evaluation and interaction recording are not supported.
 
@@ -207,6 +215,14 @@ The [Release dsh plugin workflow](https://github.com/Tencent/BrowserSkill/blob/m
 publishes the package and this README to npm. Pushing a `dsh-plugin-vX.Y.Z` tag
 triggers it; ordinary commits to `main` do not.
 
+Before publishing the plugin with `wait-for-element`, publish compatible CLI
+and extension builds containing [#407](https://github.com/Tencent/BrowserSkill/pull/407).
+The `cli-v0.3.0`, `cli-v0.3.1`, and `cli-v0.3.2` releases do not include this
+command. Confirm the compatible CLI and extension release artifacts are available
+before pushing the plugin tag; publishing the npm package alone does not upgrade
+either component on users' machines. Older installations can still use the
+[single-action recovery path](skill/references/interaction-details.md#element-waits).
+
 1. Commit this README and any other changes intended for the release.
 2. From the repository root, run the
    [release script](https://github.com/Tencent/BrowserSkill/blob/main/scripts/release.mjs)
@@ -227,7 +243,7 @@ triggers it; ordinary commits to `main` do not.
    ```
 
    This publishes the DSH plugin. Push the CLI and extension tags separately when
-   those components are ready for release.
+   those components are ready for release, respecting the compatibility order above.
 
 The workflow checks the version, runs typechecks and tests, builds the package,
 and publishes it to npm.
@@ -243,3 +259,16 @@ for documentation-only changes. Published versions cannot be overwritten. See
 ## License
 
 MIT
+
+## Task video recording
+
+Ask the agent to record before it performs the task. It starts an authorized task
+tab, confirms recording is active, performs the task, then stops video before
+ending the session. No manual Start click is required. Preview and Save As are in
+the extension's Features → Video recording → Recent recordings.
+
+`browser_inspect` with `action: "video"` exposes `videoAction` start/status/stop/save/
+list/discard. The default is a silent, fixed-tab MP4 with a 60-second limit (up to
+10 minutes). Export requires an explicit `output` path on the harness host; the
+extension's Save As writes on the browser computer. Partial recordings and limits
+are reported explicitly. See the [video reference](skill/references/video.md).

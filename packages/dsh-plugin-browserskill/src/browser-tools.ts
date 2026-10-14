@@ -7,8 +7,10 @@
 
 import { defineTool, type ParameterSchemaSpec, type ToolDefinition } from "@deepseek-ai/dsh-tools";
 import { DEBUG_PARAMETERS } from "./debug-tool";
+import { EXTRACT_PARAMETERS } from "./extract-tool";
 import {
   BROWSER_PARAM,
+  ELEMENT_WAIT_PARAMS,
   SESSION_PARAM,
   SESSION_STOP_PARAMS,
   TAB_ID_PARAM,
@@ -16,6 +18,17 @@ import {
   WAIT_UNTIL_PARAM,
 } from "./tool-params";
 import { createBrowserOperationDefinitions, type ToolDeps } from "./tools";
+import { VIDEO_PARAMETERS } from "./video-tool";
+
+// Exclude the shared path before combining action-specific schemas.
+const { output: debugOutput, ...debugParameters } = DEBUG_PARAMETERS;
+const { output: videoOutput, ...videoParameters } = VIDEO_PARAMETERS;
+const { output: extractOutput, ...extractParameters } = EXTRACT_PARAMETERS;
+const INSPECT_OUTPUT = {
+  type: debugOutput.type satisfies typeof videoOutput.type & typeof extractOutput.type,
+  description:
+    "Debug export: new local JSON path. Video save: explicit MP4 destination chosen by the user; omit to preview and Save As in the extension. Video replacement requires overwrite=true. Extract: new JSON/CSV file on the CLI host; required for CSV.",
+} as const;
 
 const DEVICE_PRESETS = [
   "iphone-14",
@@ -132,14 +145,17 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
     name: "browser_page",
     description:
       "Navigate and wait on the active Agent Window tab. Actions: navigate, back, forward, reload, " +
-      "wait. navigate requires url; reload optionally accepts hard; navigation actions accept " +
-      "waitUntil/timeoutMs. Observe again after a meaningful page change before reusing refs.",
+      "wait, wait-for-element. navigate requires url; reload optionally accepts hard; navigation " +
+      "actions and wait accept waitUntil/timeoutMs. wait-for-element requires target and accepts " +
+      "state/pollMs; its timeoutMs defaults to 10000 (max 300000). Check satisfied: false means " +
+      "timeout, not success. Observe again after a meaningful page change before reusing refs.",
     actions: {
       navigate: "page.navigate",
       back: "page.back",
       forward: "page.forward",
       reload: "page.reload",
       wait: "page.wait",
+      "wait-for-element": "page.wait-for-element",
     },
     parameters: {
       session: SESSION_PARAM,
@@ -148,13 +164,16 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
       waitUntil: WAIT_UNTIL_PARAM,
       timeoutMs: TIMEOUT_MS_PARAM,
       hard: { type: "boolean", description: "Bypass cache for reload." },
+      ...ELEMENT_WAIT_PARAMS,
     },
   },
   {
     name: "browser_inspect",
     description:
       "Inspect page state and explicitly control task-scoped debugging. Actions: observe, snapshot, html, " +
-      "screenshot, console, network. Prefer observe, then snapshot, then bounded html; use screenshot " +
+      "screenshot, console, network, video, extract. video with videoAction starts/stops a requested recording, checks status, lists, saves or discards MP4 artifacts. Start video before task operations and stop before session teardown. " +
+      "extract reads loaded table/list rows with columns and sources, without scrolling or paging: discover first, then pass extractTarget; " +
+      "check coverage and warnings before calling the data complete. Prefer observe, then snapshot, then bounded html; use screenshot " +
       "for visual evidence. console/network support cursor fields since/limit/maxTextChars. " +
       "debug with debugAction starts/stops capture, reads/exports evidence, or explicitly controls network traffic. " +
       "rule_add/rule_enable can block, modify or mock live requests; replay sends a new request and may change server data. Start capture before visiting the page.",
@@ -166,11 +185,16 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
       console: "inspect.console",
       network: "inspect.network",
       debug: "inspect.debug",
+      video: "inspect.video",
+      extract: "inspect.extract",
     },
     parameters: {
       session: SESSION_PARAM,
       tabId: TAB_ID_PARAM,
-      ...DEBUG_PARAMETERS,
+      ...debugParameters,
+      ...videoParameters,
+      ...extractParameters,
+      output: INSPECT_OUTPUT,
       maxDepth: { type: "integer", description: "Tree depth cap for observe/snapshot." },
       maxTokens: { type: "integer", description: "Token cap for observe/snapshot." },
       cursor: {
@@ -178,7 +202,7 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
         description: "Observe continuation cursor; use current refs before continuing.",
       },
       ref: { type: "string", description: "Fresh ref for scoped html or cropped screenshot." },
-      maxBytes: { type: "integer", description: "HTML byte cap." },
+      maxBytes: { type: "integer", description: "HTML/extraction byte cap." },
       since: { type: "integer", description: "Console/network sequence cursor." },
       limit: {
         type: "integer",
