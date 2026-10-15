@@ -25,6 +25,8 @@ import {
   type BskRunner,
   bskInstallMessage,
   isCommandNotFound,
+  isNavigationLifecycleTimeoutPayload,
+  type ParseBskJsonOptions,
   parseBskJson,
   runWithSessionBusyRetry,
 } from "./runner";
@@ -88,6 +90,7 @@ async function runBsk(
   observeSession?: string,
   runnerTimeoutMs?: number,
   initializing = false,
+  parseOptions: ParseBskJsonOptions = {},
 ): Promise<unknown> {
   const releaseForeground =
     observeSession !== undefined ? deps.observation.acquireForeground(observeSession) : undefined;
@@ -133,7 +136,7 @@ async function runBsk(
       error.name = "AbortError";
       throw error;
     }
-    return parseBskJson(result, label);
+    return parseBskJson(result, label, parseOptions);
   } catch (error) {
     actionError = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw error;
@@ -213,6 +216,8 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
             browserInstanceId: { type: "string", required: true },
             url: { type: "string" },
             device: { type: "string" },
+            reached: { type: "string" },
+            warning: { type: "string" },
           },
         },
         render: (_args, value) => [
@@ -221,7 +226,10 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
             text:
               `started browser session ${value.sessionId}` +
               (value.url !== undefined ? ` and navigated to ${value.url}` : "") +
-              (value.device !== undefined ? ` (device: ${value.device})` : ""),
+              (value.device !== undefined ? ` (device: ${value.device})` : "") +
+              (value.reached === "timeout"
+                ? " — initial navigation timed out before the requested lifecycle phase; session is usable"
+                : ""),
           },
         ],
       },
@@ -266,8 +274,20 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
               true,
             );
           }
+          let navigationTimeout:
+            | {
+                reached: "timeout";
+                url?: string;
+                final_url?: string;
+                error_text?: string;
+              }
+            | undefined;
           if (args.url !== undefined) {
-            await runBsk(
+            // Combined start-with-URL: a lifecycle wait timeout (exit 4 +
+            // reached:"timeout") must not cancel the session that was already
+            // created — the page may still be usable. Genuine navigate failures
+            // still fall through to starts.fail below.
+            const navigateReply = await runBsk(
               deps,
               exec,
               ["navigate", "--session", reply.session_id, args.url],
@@ -275,19 +295,56 @@ function defineBrowserOperations(deps: ToolDeps, register: DefinitionRegistrar):
               reply.session_id,
               undefined,
               true,
+              { allowNavigationTimeout: true },
             );
+            if (isNavigationLifecycleTimeoutPayload(navigateReply)) {
+              navigationTimeout = {
+                reached: "timeout",
+                url: typeof navigateReply.url === "string" ? navigateReply.url : undefined,
+                final_url:
+                  typeof navigateReply.final_url === "string" ? navigateReply.final_url : undefined,
+                error_text:
+                  typeof navigateReply.error_text === "string"
+                    ? navigateReply.error_text
+                    : undefined,
+              };
+              deps.observation.setUrl(
+                reply.session_id,
+                navigationTimeout.final_url ?? navigationTimeout.url ?? args.url,
+              );
+            } else {
+              const okReply = navigateReply as {
+                url?: string;
+                final_url?: string;
+              };
+              deps.observation.setUrl(
+                reply.session_id,
+                okReply.final_url ?? okReply.url ?? args.url,
+              );
+            }
           }
           await starts.claim(record, exec.signal);
+          return {
+            sessionId: reply.session_id,
+            browserInstanceId: reply.browser_instance_id,
+            ...(args.url !== undefined ? { url: args.url } : {}),
+            ...(args.device !== undefined ? { device: args.device } : {}),
+            ...(navigationTimeout !== undefined
+              ? {
+                  reached: "timeout" as const,
+                  warning:
+                    "Initial navigation timed out waiting for the page lifecycle; " +
+                    "the session remains open — observe the page and decide how to proceed." +
+                    (navigationTimeout.error_text !== undefined
+                      ? ` (${navigationTimeout.error_text})`
+                      : ""),
+                }
+              : {}),
+          };
         } catch (error) {
           await starts.fail(record).catch(() => {});
           throw error;
         }
-        return {
-          sessionId: reply.session_id,
-          browserInstanceId: reply.browser_instance_id,
-          ...(args.url !== undefined ? { url: args.url } : {}),
-          ...(args.device !== undefined ? { device: args.device } : {}),
-        };
       },
       presentCall: (args) => ({
         card: "terminal",

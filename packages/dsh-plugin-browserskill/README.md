@@ -54,9 +54,9 @@ dsh plugin --profile web update @wxg-prc-cpg/browser-skill-dsh-plugin --latest
 Restart that dsh profile after upgrading. This command updates the plugin; update
 the `bsk` CLI and browser extension separately when a release requires it.
 
-### Breaking tool API migration (unreleased)
+### Breaking tool API migration (0.3.3)
 
-The next coordinated release replaces all six `browser_*` tool names with stable
+The coordinated 0.3.3 release replaces all six `browser_*` tool names with stable
 BrowserSkill-specific names. This avoids collisions with other browser plugins
 such as `dsh-builtin-browser`; both plugins keep their own tools and sessions.
 
@@ -69,7 +69,8 @@ such as `dsh-builtin-browser`; both plugins keep their own tools and sessions.
 | `browser_tabs` | `bsk_tabs` |
 | `browser_assist` | `bsk_assist` |
 
-Actions, parameters, results, and `/browser-skill` are unchanged. The old tool
+The tool-name migration leaves actions, parameters, results and `/browser-skill`
+unchanged. The old tool
 names are not registered as aliases. After upgrading, restart the DSH profile and
 invoke `/browser-skill` again in existing conversations to load the new instructions.
 Update hardcoded tool calls, allow/deny lists, and `toolOrder` entries to the new
@@ -78,8 +79,9 @@ names. Do not replay old calls unchanged: another plugin may own those names.
 Existing conversation logs and screenshot attachments are left intact. New
 `bsk_inspect` results use the screenshot view; old `browser_inspect` cards may use
 DSH's generic renderer and do not retain the custom thumbnail/preview interaction.
-This migration must ship as a breaking release, with the shared CLI/extension/plugin
-version coordinated by the release process, rather than as a patch to 0.3.2.
+This is a breaking change from 0.3.2. Upgrade the CLI and browser extension to
+0.3.3 before upgrading this plugin to use the new video, extraction and element-wait
+capabilities. Updating the npm package does not update either component.
 
 ## Tools
 
@@ -259,35 +261,29 @@ The [Release dsh plugin workflow](https://github.com/Tencent/BrowserSkill/blob/m
 publishes the package and this README to npm. Pushing a `dsh-plugin-vX.Y.Z` tag
 triggers it; ordinary commits to `main` do not.
 
-Before publishing the plugin with `wait-for-element`, publish compatible CLI
-and extension builds containing [#407](https://github.com/Tencent/BrowserSkill/pull/407).
+Before publishing the 0.3.3 plugin, publish the coordinated 0.3.3 CLI and extension.
+Element waits require the implementation introduced in [#407](https://github.com/Tencent/BrowserSkill/pull/407).
 The `cli-v0.3.0`, `cli-v0.3.1`, and `cli-v0.3.2` releases do not include this
 command. Confirm the compatible CLI and extension release artifacts are available
 before pushing the plugin tag; publishing the npm package alone does not upgrade
 either component on users' machines. Older installations can still use the
 [single-action recovery path](skill/references/interaction-details.md#element-waits).
 
-1. Commit this README and any other changes intended for the release.
-2. From the repository root, run the
-   [release script](https://github.com/Tencent/BrowserSkill/blob/main/scripts/release.mjs)
-   with a new stable version, replacing `<version>` below. The script updates the
-   CLI, extension, and DSH plugin versions, commits the version changes, and creates
-   their release tags:
+1. Prepare a release PR that updates the shared CLI, extension and plugin version,
+   local Cargo lock entries, changelog and relevant documentation. Merge it after
+   validation and record the merge commit.
+2. Tag that commit as `ext-v<version>` and wait for the browser extension to become
+   available. Then tag the same commit as `cli-v<version>` and wait for the complete
+   CLI release, including [Windows signing](../../docs/windows-signing.md).
+3. Create `dsh-plugin-v<version>` on that same merge commit and push only that tag:
 
    ```sh
-   node scripts/release.mjs <version>
+   git tag -a dsh-plugin-v<version> <merge-commit> -m "Release DSH plugin <version>"
+   git -c push.followTags=false push origin refs/tags/dsh-plugin-v<version>
    ```
 
-3. Push the version commit to the release branch, then push the DSH plugin tag
-   created by the script, using the same `<version>`:
-
-   ```sh
-   git push origin HEAD
-   git push origin dsh-plugin-v<version>
-   ```
-
-   This publishes the DSH plugin. Push the CLI and extension tags separately when
-   those components are ready for release, respecting the compatibility order above.
+4. Approve the `npm-publish` environment deployment in GitHub Actions when required,
+   then verify the published npm version and `latest` dist-tag.
 
 The workflow checks the version, runs typechecks and tests, builds the package,
 and publishes it to npm.

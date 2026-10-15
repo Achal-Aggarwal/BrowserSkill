@@ -35,6 +35,8 @@ Use the `bsk` CLI with Cursor, Claude Code, Codex, OpenClaw, CodeBuddy, WorkBudd
 | **Choose the right browser** | Name browser instances, bind a task to a specific profile, or pair an agent running on a server with a browser on your computer. |
 | **Review what happened** | Reopen browser-local debugging history, export evidence as JSON, or enable a separate operation audit to review task activity. |
 | **Extract structured data** | Export loaded tables and lists as JSON/CSV with column names, page/frame sources, merged-cell metadata and explicit coverage. See [structured extraction](docs/structured-extraction.md). |
+| **Record a task as video** | Ask the agent to record one authorized tab as a silent MP4, then preview, save or delete the video from the extension. See [task video recording](docs/video-recording.md). |
+| **Wait for page conditions** | Wait for a requested element condition with an explicit timeout before continuing a workflow. See [element waits](docs/wait-for-element.md). |
 
 Watch a browser task in action:
 
@@ -158,6 +160,8 @@ In WorkBuddy/CodeBuddy, or hosts that reap command children, the agent should re
 
 The [DSH plugin](packages/dsh-plugin-browserskill/README.md) adds native `bsk_*` tools, browser task previews, and screenshot results to the DeepSeek Harness Web UI. It uses the same `bsk` CLI and extension and includes its own BrowserSkill skill.
 
+**Upgrading to 0.3.3:** update the CLI and extension before the plugin. The six `browser_*` tools have been renamed to `bsk_*`, without aliases for the old names. Update custom tool calls and policies, restart the DSH profile, and invoke `/browser-skill` again in existing conversations. See the [migration guide](packages/dsh-plugin-browserskill/README.md#breaking-tool-api-migration-033).
+
 With DeepSeek Harness, pnpm, and `bsk` installed and the extension connected, add the plugin to your profile:
 
 ```sh
@@ -217,7 +221,7 @@ The name is set in BrowserSkill; it is not automatically taken from Chrome's pro
 
 Keep the browser and its logins on your computer while the agent, CLI, and daemon run on a server. Pair the extension with that server over authenticated WSS; the browser initiates the connection, so your computer needs no inbound port.
 
-The built-in server supports device pairing, renewal, and revocation. Remote mode currently does not support file upload or download. [Remote connection guide](docs/remote-extension-connection.md)
+The built-in server supports device pairing, renewal, and revocation. The `bsk upload` and `bsk download` file-transfer commands remain local-only. Authorized video exports can write to the CLI machine, including a remote server; Save MP4 as in the extension writes to the browser computer. [Remote connection guide](docs/remote-extension-connection.md)
 
 ## Browser control and privacy
 
@@ -234,12 +238,13 @@ These browser settings apply to existing and new sessions. Legacy `--unattended`
 
 BrowserSkill does not operate a mandatory cloud service or collect product telemetry. Automation results go to your selected daemon or gateway and the agent using it; that agent or service may process or retain them under its own policies. The extension does not independently call an AI provider.
 
-| Optional history | Where it is saved | What to know |
+| Optional history and recordings | Where it is saved | What to know |
 | --- | --- | --- |
 | **Website debugging** | The current browser profile, including in remote mode | Retains captured evidence, including available bodies and field values. Stopped records expire after 30 days, with a 50-record / 50 MiB retention budget and earlier eviction when necessary. Stop capture before deleting a record. |
 | **Operation audit** | The daemon's host, under `BSK_HOME/audit` | Off by default. Records task and operation metadata, excluding input values, page bodies, screenshots, and file contents. Ended tasks expire after 30 days. |
+| **Task video** | The current browser profile; exported copies at the chosen destination | Opt-in, silent capture of one authorized tab, limited to 10 minutes / 256 MiB per video. Recordings expire 24 hours after creation; the temporary video budget is 1 GiB. The library supports preview, export and deletion. |
 
-Both offer export and deletion. Stopping a task or disconnecting does not delete saved history; expiration is applied during history access or cleanup. Exported copies and copies already received by an agent or gateway must be managed separately. Known secrets are filtered from debugging evidence, but redaction cannot guarantee that all sensitive data is removed.
+These features offer export and deletion. Stopping a task or disconnecting does not delete retained history or videos; expiration is applied during access or cleanup. Exported copies and copies already received by an agent or gateway must be managed separately. Known secrets are filtered from debugging evidence, but redaction cannot guarantee that all sensitive data is removed. Video frames are not automatically redacted; review visible content before sharing.
 
 [Privacy policy](apps/extension/PRIVACY.md) · [Operation audit](docs/operation-audit.md) · [Debugging retention and limits](docs/website-debugging.md#history-and-export)
 
@@ -281,6 +286,9 @@ Stop the daemon in its owning host or supervisor, update with `bsk update --yes 
 | Install and verify with an agent | [Agent setup](AGENT_INSTALL.md) |
 | Investigate a website or API | [Website debugging](docs/website-debugging.md) |
 | Capture long pages | [Full-page screenshots](docs/long-screenshot.md) |
+| Record and save a task video | [Task video recording](docs/video-recording.md) |
+| Export tables or lists | [Structured extraction](docs/structured-extraction.md) |
+| Wait for an element condition | [Element waits](docs/wait-for-element.md) |
 | Use a specific account or profile | [Browser profiles](docs/browser-profiles.md) |
 | Connect a server-side agent | [Remote browser connections](docs/remote-extension-connection.md) |
 | Run in a sandbox | [Sandboxed agents](docs/sandboxed-agents.md) |

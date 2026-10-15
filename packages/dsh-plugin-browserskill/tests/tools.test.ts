@@ -82,6 +82,15 @@ function fakeRunner(responses: Record<string, unknown>) {
               typeof response === "object" && response !== null && "__seq" in response
                 ? (response as { __seq: unknown[] }).__seq.shift()
                 : response;
+            // Allow tests to return a full BskRunResult (custom exit code / body).
+            if (
+              typeof reply === "object" &&
+              reply !== null &&
+              "__result" in reply &&
+              typeof (reply as { __result: unknown }).__result === "object"
+            ) {
+              return (reply as { __result: BskRunResult }).__result;
+            }
             return {
               code: 0,
               stdout: JSON.stringify(reply),
@@ -361,9 +370,12 @@ describe("session.start", () => {
     [false, "--focus"],
   ])("maps noFocus=%s to %s", async (noFocus, flag) => {
     const { tools, calls } = setup({ "session start": START_REPLY("s1") });
-    await tools
-      .get("bsk_session")
-      ?.execute({ action: "start", ...(noFocus === undefined ? {} : { noFocus }) }, makeExec());
+    const tool = tools.get("bsk_session");
+    if (!tool) throw new Error("bsk_session not registered");
+    await tool.execute(
+      { action: "start", ...(noFocus === undefined ? {} : { noFocus }) },
+      makeExec(),
+    );
     expect(calls[0].args.filter((arg) => arg === "--focus" || arg === "--no-focus")).toEqual(
       flag ? [flag] : [],
     );
@@ -419,6 +431,89 @@ describe("session.start", () => {
       "session stop": {},
     });
     // navigate has no canned response -> non-zero exit -> error.
+    const tool = tools.get("session.start");
+    await expect(tool?.execute({ url: "https://example.com" }, makeExec())).rejects.toThrow(
+      /navigate/,
+    );
+    expect(calls.some((c) => c.args[1] === "request" && c.args.includes("--cancel"))).toBe(true);
+    expect(registry.current()).toBeUndefined();
+  });
+
+  it("keeps the session when combined start-with-URL hits a navigation lifecycle timeout", async () => {
+    // CLI exit 4 + reached:"timeout" must not cancel the newly created session
+    // (review on #442): the agent should get sessionId + an explicit warning and
+    // be able to observe afterwards. Exit 4 alone is not treated as success.
+    const { tools, calls, registry } = setup({
+      "session start": START_REPLY("s1"),
+      navigate: {
+        __result: {
+          code: 4,
+          stdout: JSON.stringify({
+            tab_id: 7,
+            url: "https://slow.example/",
+            final_url: "https://slow.example/",
+            reached: "timeout",
+            error_text: "timed out waiting for load",
+          }),
+          stderr: "",
+          timedOut: false,
+          aborted: false,
+        },
+      },
+      observe: {
+        text: '- heading "Partial" [ref=@e1]',
+        ref_count: 1,
+        tab_id: 7,
+        truncated: false,
+      },
+    });
+    const start = tools.get("session.start");
+    const value = (await start?.execute({ url: "https://slow.example/" }, makeExec())) as {
+      sessionId: string;
+      reached?: string;
+      warning?: string;
+      url?: string;
+    };
+    expect(value).toMatchObject({
+      sessionId: "s1",
+      url: "https://slow.example/",
+      reached: "timeout",
+    });
+    expect(value.warning).toMatch(/timed out/i);
+    expect(value.warning).toMatch(/remains open|usable|observe/i);
+    // Claimed and active — no cancel/cleanup issued.
+    expect(registry.current()).toBe("s1");
+    expect(calls.some((c) => c.args[1] === "request" && c.args.includes("--cancel"))).toBe(false);
+    expect(calls.some((c) => c.args.join(" ").startsWith("session stop"))).toBe(false);
+
+    const observe = tools.get("inspect.observe");
+    const observed = (await observe?.execute({}, makeExec())) as {
+      session: string;
+      refCount: number;
+    };
+    expect(observed).toMatchObject({ session: "s1", refCount: 1 });
+    expect(calls.some((c) => c.args[0] === "observe" && c.args.includes("s1"))).toBe(true);
+  });
+
+  it("still cleans up when exit 4 lacks reached: timeout on combined start", async () => {
+    // Exit 4 is also used for session_busy / other errors — must not keep the session.
+    const { tools, calls, registry } = setup({
+      "session start": START_REPLY("s1"),
+      "session stop": {},
+      navigate: {
+        __result: {
+          code: 4,
+          stdout: JSON.stringify({
+            code: "timeout",
+            message: "session already has an unfinished command",
+            data: { reason: "session_busy" },
+          }),
+          stderr: "",
+          timedOut: false,
+          aborted: false,
+        },
+      },
+    });
     const tool = tools.get("session.start");
     await expect(tool?.execute({ url: "https://example.com" }, makeExec())).rejects.toThrow(
       /navigate/,
