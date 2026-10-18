@@ -46,18 +46,18 @@ body:
     id: affected_surface
     attributes:
       label: Affected CLI / API Surface
-      description: Which commands, flags, IPC protocol endpoints, or extension components would be affected?
-      placeholder: e.g., `bsk session`, `bsk daemon`, CDP bridge, extension popup, protocol schemas.
+      description: Which commands, flags, IPC protocol endpoints, or extension components would be affected? (Optional / N/A if not sure).
+      placeholder: e.g., `bsk session`, `bsk daemon`, CDP bridge, extension popup, protocol schemas (leave blank or enter "N/A" if unknown).
     validations:
-      required: true
+      required: false
   - type: textarea
     id: compatibility
     attributes:
       label: Compatibility Considerations
-      description: Does this introduce breaking changes to the CLI interface, protocol schema, or platform requirements?
-      placeholder: Note any backward-compatibility impact or platform-specific considerations (Windows/macOS/Linux).
+      description: Does this introduce breaking changes to the CLI interface, protocol schema, or platform requirements? (Optional / N/A if not sure).
+      placeholder: Note any backward-compatibility impact or platform-specific considerations (Windows/macOS/Linux). Enter "N/A" if unknown.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: additional_context
     attributes:

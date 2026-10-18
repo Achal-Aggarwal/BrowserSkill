@@ -111,10 +111,11 @@ body:
     id: logs
     attributes:
       label: Relevant Logs / Diagnostics Output
-      description: Output from `bsk logs`, `bsk doctor`, or stderr/stdout (ensure secrets and credentials are fully redacted).
+      description: Relevant output from `bsk logs`, `bsk doctor`, or stderr/stdout (optional, if available; ensure secrets and credentials are fully redacted).
+      placeholder: Paste any relevant logs, terminal output, or diagnostic info here (leave blank or enter "N/A" if not applicable).
       render: shell
     validations:
-      required: true
+      required: false
   - type: dropdown
     id: regression
     attributes:
