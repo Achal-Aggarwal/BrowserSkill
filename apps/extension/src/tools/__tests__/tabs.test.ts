@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type CdpDebuggerApi, ChromiumCdp } from "@/browser-driver/chromium-cdp";
+import type { AgentWindowCreateOptions } from "@/session-manager/agent-window";
 import { SessionManager } from "@/session-manager/manager";
 import { handleHover } from "../interaction";
 import { resolveTargetTab } from "../shared";
@@ -20,10 +21,10 @@ import {
 function fakeAgentWindow(ids: number[]) {
   let i = 0;
   return {
-    create: vi.fn(async () => {
+    create: vi.fn(async (_url: string, options: AgentWindowCreateOptions = {}) => {
       const id = ids[i++];
       if (id === undefined) throw new Error("ran out of fake window ids");
-      return { windowId: id, initialTabIds: [] };
+      return { windowId: id, initialTabIds: [], incognito: options.incognito ?? false };
     }),
     remove: vi.fn(async () => {}),
     ensureActiveTab: vi.fn(async () => 1),
@@ -563,6 +564,41 @@ describe("handleTabSelect", () => {
 });
 
 describe("handleTabBorrow", () => {
+  it.each([
+    { sessionIncognito: true, tabIncognito: false },
+    { sessionIncognito: true, tabIncognito: true },
+    { sessionIncognito: false, tabIncognito: true },
+  ])("rejects incognito borrowing before asking or moving ($sessionIncognito, $tabIncognito)", async ({
+    sessionIncognito,
+    tabIncognito,
+  }) => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11", { incognito: sessionIncognito });
+    const state: FakeTabState = {
+      tabs: new Map([
+        [7, { id: 7, windowId: 200, index: 0, incognito: tabIncognito } as chrome.tabs.Tab],
+      ]),
+      nextTabId: 50,
+      windowsClosed: new Set(),
+    };
+    const { api, spies } = makeTabMutationApi(state);
+    const approveBorrow = vi.fn(async () => true);
+    expect(
+      await handleTabBorrow(
+        sm,
+        { session_id: "aa11", tab_id: 7, confirm: false },
+        { tabs: api, approveBorrow },
+      ),
+    ).toMatchObject({
+      code: "permission_denied",
+      data: { reason: "incognito_borrow_disabled" },
+    });
+    expect(approveBorrow).not.toHaveBeenCalled();
+    expect(spies.move).not.toHaveBeenCalled();
+    expect(ctx.borrowedTabs.size).toBe(0);
+    expect(sm.findBorrowingSession(7, null)).toBeNull();
+  });
+
   it("reports an unknown effect when cancellation rollback fails", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");

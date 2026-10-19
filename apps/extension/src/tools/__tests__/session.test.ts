@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentWindowCreateOptions } from "@/session-manager/agent-window";
 import { createDisconnectCleanup } from "@/session-manager/disconnect-cleanup";
 import { SessionManager } from "@/session-manager/manager";
 import * as recording from "../record";
@@ -25,10 +26,10 @@ function makeQuery(state: FakeState): ChromeTabsApi {
 
 function fakeAgentWindow(ids: number[]) {
   let i = 0;
-  const create = vi.fn(async () => {
+  const create = vi.fn(async (_url: string, options: AgentWindowCreateOptions = {}) => {
     const id = ids[i++];
     if (id === undefined) throw new Error("ran out of fake ids");
-    return { windowId: id, initialTabIds: [] };
+    return { windowId: id, initialTabIds: [], incognito: options.incognito ?? false };
   });
   const remove = vi.fn(async (_windowId: number) => {});
   const ensureActiveTab = vi.fn(async () => 0);
@@ -561,13 +562,16 @@ describe("handleSessionStop browser compatibility (issue #272)", () => {
 describe("handleSessionStop window release (issue #57)", () => {
   const agentWindowId = 100;
 
-  it("releases the window when user-created tabs remain", async () => {
+  it.each([
+    false,
+    true,
+  ])("releases the window when user-created tabs remain (incognito=%s)", async (incognito) => {
     const aw = fakeAgentWindow([agentWindowId]);
     // ensureActiveTab returns the home tab id (10). We override the fake to
     // return a known id.
     aw.ensureActiveTab = vi.fn(async () => 10);
     const sm = new SessionManager({ agentWindow: aw });
-    const ctx = await sm.start("aa11");
+    const ctx = await sm.start("aa11", { incognito });
     ctx.agentCreatedTabs.add(11);
     ctx.agentCreatedTabs.add(12);
     // user tab 99 (created via Chrome UI, NOT in agentCreatedTabs)
@@ -601,11 +605,14 @@ describe("handleSessionStop window release (issue #57)", () => {
     expect(sm.has("aa11")).toBe(false);
   });
 
-  it("closes the window (not release) when no user tabs remain", async () => {
+  it.each([
+    false,
+    true,
+  ])("closes the window when no user tabs remain (incognito=%s)", async (incognito) => {
     const aw = fakeAgentWindow([agentWindowId]);
     aw.ensureActiveTab = vi.fn(async () => 10);
     const sm = new SessionManager({ agentWindow: aw });
-    const ctx = await sm.start("aa11");
+    const ctx = await sm.start("aa11", { incognito });
     ctx.agentCreatedTabs.add(11);
     const state: FakeState = {
       tabs: new Map([
