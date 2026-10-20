@@ -76,7 +76,8 @@ async function collectTasks<T>(
  * capture needs it only for its own reads, so each target that enabled it
  * disables it again under the same worker bound. Like other cleanup, this
  * never reconnects a replaced attachment, and nothing is queued behind a read
- * still running past its deadline. */
+ * still running past its deadline. The driver's cleanup deadline also bounds
+ * a disable command if the renderer stops responding after the AX reads. */
 async function releaseAccessibility(
   cdp: CdpRunner,
   tabId: number,
