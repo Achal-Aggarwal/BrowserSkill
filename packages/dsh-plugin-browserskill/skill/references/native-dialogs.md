@@ -3,7 +3,7 @@
 The agent decides native alert, confirm, prompt, and beforeunload dialogs from
 the user's workflow. A `dialog_pending` tool error includes the pending dialog
 and original operation id; **do not repeat the original action**. Use
-`browser_assist` actions `dialog-status`, `dialog-accept`, or `dialog-dismiss` with
+`bsk_assist` actions `dialog-status`, `dialog-accept`, or `dialog-dismiss` with
 `dialogId` and optional prompt `text` (an empty string is intentional). Then call
 `operation-await` with the original `operationId` to retrieve its result. Another
 pending dialog keeps that operation id and needs another decision. Completed

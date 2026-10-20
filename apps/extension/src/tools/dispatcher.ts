@@ -241,6 +241,14 @@ export class ToolDispatcher {
         const active = this.activeDialogOperations.get(sessionId);
         if (reason === "decision_timeout" && active)
           this.inflightAbortControllers.get(active.request.id)?.abort();
+        // Dismissing one dialog can synchronously resume page code that opens
+        // another. Keep rejecting the chain until the original handler settles.
+        if (
+          dialog &&
+          active &&
+          this.inflightAbortControllers.get(active.request.id)?.signal.aborted
+        )
+          void this.cdp?.resolveDialog?.(dialog.id, false).catch(() => {});
         try {
           this.transport.send({
             event: "dialog.changed",
@@ -322,12 +330,12 @@ export class ToolDispatcher {
         const active = [...this.activeDialogOperations.values()].find(
           (item) => item.request.id === target,
         );
-        if (active) this.dismissOperationDialogs(active.request);
         try {
           ac.abort();
         } catch (err) {
           console.warn("[bsk dispatcher] AbortController.abort() threw", err);
         }
+        if (active) this.dismissOperationDialogs(active.request);
       }
       const reply: ResponseFrame = {
         id: req.id,
@@ -349,12 +357,6 @@ export class ToolDispatcher {
     const operationParams = req.params as
       | { session_id?: string; _operation_id?: string }
       | undefined;
-    if (operationParams?.session_id && operationParams._operation_id) {
-      this.activeDialogOperations.set(operationParams.session_id, {
-        request: req,
-        operationId: operationParams._operation_id,
-      });
-    }
     let body: ResponseFrame;
     let startedSession: string | null = null;
     let debugTicket: DebugTicket | undefined;
@@ -376,7 +378,28 @@ export class ToolDispatcher {
             data: { dispatched: false, dialog: blocked, session_id: operationParams?.session_id },
           },
         };
+      } else if (
+        operationParams?.session_id &&
+        operationParams._operation_id &&
+        this.activeDialogOperations.has(operationParams.session_id)
+      ) {
+        // A daemon cleanup deadline can expire before Chrome releases the
+        // original call. Do not replace the owner of its dialog cleanup.
+        body = {
+          id: req.id,
+          error: {
+            code: "cdp_failed",
+            message: "Previous operation is still settling; this action was not dispatched",
+            data: { dispatched: false },
+          },
+        };
       } else {
+        if (operationParams?.session_id && operationParams._operation_id) {
+          this.activeDialogOperations.set(operationParams.session_id, {
+            request: req,
+            operationId: operationParams._operation_id,
+          });
+        }
         const sessionId = sessionIdForBrowserControlMethod(req);
         if (sessionId) this.onBrowserControlResumed?.(sessionId);
         // Best-effort context must never prevent the requested operation.
