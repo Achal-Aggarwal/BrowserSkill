@@ -259,7 +259,10 @@ describe("handleSessionStop with auto-return", () => {
     expect(agentOverlayReset.resetAgentOverlays).toHaveBeenCalledWith(7, "aa11");
   });
 
-  it("falls back when the original window is gone but still completes stop", async () => {
+  it.each([
+    false,
+    true,
+  ])("completes stop using a normal fallback (last incognito=%s)", async (incognito) => {
     const aw = fakeAgentWindow([100]);
     const sm = new SessionManager({ agentWindow: aw });
     const ctx = await sm.start("aa11");
@@ -271,6 +274,11 @@ describe("handleSessionStop with auto-return", () => {
       moves: [],
     };
     const { tabs, windows } = makeApis(state);
+    vi.mocked(windows.getLastFocused).mockResolvedValue({
+      id: 500,
+      type: "normal",
+      incognito,
+    } as chrome.windows.Window);
     const res = await handleSessionStop(
       sm,
       { session_id: "aa11" },
@@ -278,8 +286,21 @@ describe("handleSessionStop with auto-return", () => {
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
     expect(res.returned_tab_ids).toEqual([7]);
-    expect(state.moves[0].windowId).toBe(500); // lastFocused fallback
+    expect(res.return_failures).toBeUndefined();
+    expect(state.moves).toEqual([
+      { tabId: 7, windowId: incognito ? 999 : 500, index: incognito ? 0 : -1 },
+    ]);
+    if (incognito) {
+      expect(windows.create).toHaveBeenCalledExactlyOnceWith({
+        url: "chrome://newtab/",
+        focused: false,
+        incognito: false,
+      });
+    } else {
+      expect(windows.create).not.toHaveBeenCalled();
+    }
     expect(sm.has("aa11")).toBe(false);
+    expect(aw.remove).toHaveBeenCalledWith(100);
   });
 
   it("keeps the session open when any borrowed tab cannot be returned", async () => {

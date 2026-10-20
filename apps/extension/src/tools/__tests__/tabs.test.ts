@@ -1102,7 +1102,8 @@ describe("handleTabReturn", () => {
       windowsClosed: new Set(),
     };
     const { api, spies } = makeTabMutationApi(state);
-    const { api: windowsApi } = makeWindowsApi(state);
+    const { api: windowsApi, spies: winSpies } = makeWindowsApi(state);
+    winSpies.lastFocused.mockResolvedValue({ id: 500, type: "normal", incognito: true });
     const res = await handleTabReturn(
       sm,
       { session_id: "aa11", tab_id: 7 },
@@ -1114,6 +1115,7 @@ describe("handleTabReturn", () => {
     expect(res.fallback).toBeUndefined();
     expect(ctx.borrowedTabs.has(7)).toBe(false);
     expect(spies.move).toHaveBeenCalledWith(7, { windowId: 200, index: 4 });
+    expect(winSpies.lastFocused).not.toHaveBeenCalled();
   });
 
   it("resets agent overlays in a returned tab after a successful tab_return", async () => {
@@ -1141,7 +1143,10 @@ describe("handleTabReturn", () => {
     expect(agentOverlayReset.resetAgentOverlays).toHaveBeenCalledWith(7, "aa11");
   });
 
-  it("falls back to the last focused normal window when the original is gone", async () => {
+  it.each([
+    false,
+    true,
+  ])("returns to a normal fallback when the original is gone (last incognito=%s)", async (incognito) => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     const ctx = await sm.start("aa11");
     ctx.borrowedTabs.set(7, { tabId: 7, originalWindowId: 200, originalIndex: 4 });
@@ -1152,16 +1157,27 @@ describe("handleTabReturn", () => {
     };
     const { api, spies } = makeTabMutationApi(state);
     const { api: windowsApi, spies: winSpies } = makeWindowsApi(state, { lastFocused: 500 });
+    winSpies.lastFocused.mockResolvedValue({ id: 500, type: "normal", incognito });
     const res = await handleTabReturn(
       sm,
       { session_id: "aa11", tab_id: 7 },
       { tabs: api, windows: windowsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
-    expect(res.returned_to_window_id).toBe(500);
+    const windowId = incognito ? 999 : 500;
+    expect(res.returned_to_window_id).toBe(windowId);
     expect(res.fallback).toBe(true);
-    expect(spies.move).toHaveBeenCalledWith(7, { windowId: 500, index: -1 });
-    expect(winSpies.create).not.toHaveBeenCalled();
+    expect(ctx.borrowedTabs.has(7)).toBe(false);
+    expect(spies.move).toHaveBeenCalledExactlyOnceWith(7, { windowId, index: incognito ? 0 : -1 });
+    if (incognito) {
+      expect(winSpies.create).toHaveBeenCalledExactlyOnceWith({
+        url: NEW_TAB_DEFAULT_URL,
+        focused: false,
+        incognito: false,
+      });
+    } else {
+      expect(winSpies.create).not.toHaveBeenCalled();
+    }
   });
 
   it("creates a new window when no normal window remains", async () => {
