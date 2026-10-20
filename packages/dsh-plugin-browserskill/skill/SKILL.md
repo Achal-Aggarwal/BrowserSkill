@@ -1,6 +1,6 @@
 ---
 name: browser-skill
-description: Automate the user's logged-in Chromium through this plugin's injected bsk_* tools. Use to read pages, fill forms, operate tabs, inspect page activity, debug a website, or test a UI.
+description: Use injected bsk_* tools with the user's logged-in Chromium to read pages, fill forms, manage tabs, debug websites, or test UIs.
 ---
 
 # browser-skill for DeepSeek Harness
@@ -65,19 +65,19 @@ read [human help and recovery](references/help-and-recovery.md).
 Arbitrary page-script evaluation and interaction recording are intentionally unsupported.
 Do not invent tools or bypass these limits.
 
-## Native JavaScript dialogs
+## Native dialogs
 
 The agent decides native dialogs. On `dialog_pending`,
 [read this](references/native-dialogs.md); **never repeat the action**.
 
 ## Read details only when needed
 
-Resolve references from the skill resource directory provided by the harness, not
-the working directory. Read the matching file before acting; do not preload all files.
+Resolve references from the harness skill resource directory, not the working
+directory. Read matching files before acting; do not preload them all.
 
 | When | Read |
 | --- | --- |
-| Website failure, request/performance investigation, reproduction evidence, or an HTTP experiment | [Website debugging](references/debugging.md) |
+| Website failures, request/performance debugging, or HTTP experiments | [Website debugging](references/debugging.md) |
 | Required profile, borrowing/returning user tabs with `bsk_tabs`, or remote tab ownership | [Tabs and profiles](references/tabs-and-profiles.md) |
 | Hover menus, scrolling, `nextCursor`, console/network, or window/device settings with `bsk_assist` | [Interaction details](references/interaction-details.md) |
 | Screenshot or `[visual:screenshot]`/Canvas interaction | [Screenshots and Canvas](references/screenshots-and-canvas.md) |
