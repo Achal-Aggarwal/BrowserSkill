@@ -10,5 +10,5 @@ pending dialog keeps that operation id and needs another decision. Completed
 results contain `state` and `result`; failed ones contain `error`. Use
 `operation-cancel` for cancellation. A dismissed beforeunload keeps the page.
 Do not turn a native browser dialog into human request-help by default.
-Protocol 1.4 is required; unanswered dialogs reject after 60 seconds, and
+Protocol 1.5 is required; unanswered dialogs reject after 60 seconds, and
 cancellation does not undo already-dispatched page effects.

@@ -32,6 +32,10 @@ fn main() {
     dump!(DialogStatusParams, "tool_dialog_status_params");
     dump!(DialogHandleParams, "tool_dialog_handle_params");
     dump!(OperationParams, "tool_operation_params");
+    dump!(VideoParams, "tool_video_params");
+    dump!(VideoRecording, "video_recording");
+    dump!(VideoGrant, "video_grant");
+    dump!(VideoReadResult, "tool_video_read_result");
     dump!(HandshakeParams, "handshake_params");
     dump!(HandshakeResult, "handshake_result");
 
@@ -108,6 +112,8 @@ fn main() {
     dump!(ObserveResult, "tool_observe_result");
     dump!(GetHtmlParams, "tool_get_html_params");
     dump!(GetHtmlResult, "tool_get_html_result");
+    dump!(ExtractParams, "tool_extract_params");
+    dump!(ExtractResult, "tool_extract_result");
     dump!(ScreenshotParams, "tool_screenshot_params");
     dump!(ScreenshotResult, "tool_screenshot_result");
     dump!(ScreenshotFullPageParams, "tool_screenshot_full_page_params");
@@ -132,6 +138,8 @@ fn main() {
 
     dump!(WaitForNavigationParams, "tool_wait_for_navigation_params");
     dump!(WaitForNavigationResult, "tool_wait_for_navigation_result");
+    dump!(WaitForElementParams, "tool_wait_for_element_params");
+    dump!(WaitForElementResult, "tool_wait_for_element_result");
     dump!(WaitMsParams, "tool_wait_ms_params");
     dump!(WaitMsResult, "tool_wait_ms_result");
     dump!(RequestHelpParams, "tool_request_help_params");

@@ -7,7 +7,7 @@ import type {
   ResponseFrame,
 } from "./types";
 
-export const PROTOCOL_VERSION = "1.4";
+export const PROTOCOL_VERSION = "1.5";
 /**
  * Extension semver, injected at build time from `package.json` via
  * Vite's `define` (see `wxt.config.ts` and `vitest.config.ts`).
@@ -20,7 +20,7 @@ export const EXTENSION_VERSION: string =
  */
 // Native dialogs suspend RPCs. An older daemon cannot return the pending event
 // to a sequential agent, so refuse it before controlling any browser tabs.
-export const MIN_COMPATIBLE_PROTOCOL = "1.4";
+export const MIN_COMPATIBLE_PROTOCOL = "1.5";
 /**
  * **Deprecated** — legacy app-semver floor for wire compat with old
  * daemons. New code sends `"0.0.0"`; compat decisions ignore this.
@@ -138,6 +138,7 @@ function isResponseFor(msg: ProtocolFrame, id: string): boolean {
  */
 export function detectBrowserMeta(ua: string = navigator.userAgent): BrowserMeta {
   const probes: Array<[RegExp, string]> = [
+    [/YaBrowser\/([0-9.]+)/, "yandex"],
     [/Edg\/([0-9.]+)/, "edge"],
     [/OPR\/([0-9.]+)/, "opera"],
     [/Brave\/([0-9.]+)/, "brave"],

@@ -9,7 +9,7 @@ dialog. No personal Chrome profile or shared daemon is used.
 ## Run
 
 From the repository root, install the locked dependencies and build matching
-protocol 1.4 components. The extension's port must match the private test daemon:
+protocol 1.5 components. The extension's port must match the private test daemon:
 
 ```sh
 cargo build --locked -p bsk --bin bsk

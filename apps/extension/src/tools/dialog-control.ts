@@ -19,7 +19,7 @@ export async function handleDialog(
   const ctx = lookupSession(manager, params, "dialog");
   if (isRpcError(ctx)) return ctx;
   if (!cdp.pendingDialogs || !cdp.resolveDialog)
-    return { code: "unsupported", message: "Dialog control requires extension protocol 1.4" };
+    return { code: "unsupported", message: "Dialog control requires extension protocol 1.5" };
   const pending = cdp.pendingDialogs().filter((dialog) => isAgentControlledTab(ctx, dialog.tab_id));
   if (method === "tool.dialog_status") {
     const tabId = (params as DialogStatusParams).tab_id;

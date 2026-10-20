@@ -24,4 +24,4 @@ with `data.dispatched: false` has not executed and may be issued after resolutio
 Results are bounded to 4 MiB and retained for up to 5 minutes (64 operation slots).
 A 60-second unanswered-dialog deadline rejects the modal and fails the operation;
 cancellation cannot undo page effects. Disconnect/expired identities must not be
-used to replay an action with unknown effects. Requires protocol 1.4 components.
+used to replay an action with unknown effects. Requires protocol 1.5 components.
