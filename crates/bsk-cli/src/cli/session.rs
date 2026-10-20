@@ -66,6 +66,10 @@ pub struct SessionStartArgs {
     #[arg(long)]
     pub browser: Option<String>,
 
+    /// Open an incognito Agent Window (requires the extension's Allow in incognito setting).
+    #[arg(long)]
+    pub incognito: bool,
+
     /// Agent Window outer width in CSS pixels (100..=7680). Both
     /// `--width` and `--height` must be given to take effect.
     #[arg(long, value_parser = window_size)]
@@ -76,9 +80,13 @@ pub struct SessionStartArgs {
     #[arg(long, value_parser = window_size)]
     pub height: Option<u32>,
 
-    /// Open the Agent Window in the background without stealing focus.
-    #[arg(long)]
+    /// Keep the Agent Window in the background (the default).
+    #[arg(long, conflicts_with = "focus")]
     pub no_focus: bool,
+
+    /// Bring the new Agent Window to the foreground.
+    #[arg(long)]
+    pub focus: bool,
 }
 
 /// Parse a `--width` / `--height` Agent Window dimension (CSS pixels).
@@ -119,6 +127,8 @@ pub struct SessionRequestArgs {
 
 #[derive(Debug, Serialize)]
 struct StartParams {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    incognito: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -239,12 +249,13 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
     let result = start_session(
         sock,
         SessionStartOptions {
+            incognito: args.incognito,
             name: args.name,
             request_id: args.request_id,
             browser: args.browser,
             width: args.width,
             height: args.height,
-            focused: args.no_focus.then_some(false),
+            focused: Some(args.focus),
         },
     );
     waited.store(true, Ordering::SeqCst);
@@ -273,9 +284,10 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
 
 /// Options for [`start_session`]: browser selection plus Agent Window
 /// creation hints. `None` fields keep the extension-side defaults
-/// (focused window, browser-chosen size).
+/// (background window, browser-chosen size).
 #[derive(Debug, Default, Clone)]
 pub struct SessionStartOptions {
+    pub incognito: bool,
     pub request_id: Option<String>,
     pub name: Option<String>,
     pub browser: Option<String>,
@@ -286,6 +298,14 @@ pub struct SessionStartOptions {
 
 /// Start a session and open the Agent Window. Used by `session start` and `record start`.
 pub fn start_session(sock: PathBuf, opts: SessionStartOptions) -> Result<StartReply, CliError> {
+    if opts.incognito {
+        crate::cli::protocol::require_daemon_support(
+            &sock,
+            "session start --incognito",
+            bsk_protocol::tools::INCOGNITO_SESSION_PROTOCOL,
+            bsk_protocol::tools::supports_incognito_sessions,
+        )?;
+    }
     call(
         sock,
         if opts.request_id.is_some() {
@@ -294,12 +314,13 @@ pub fn start_session(sock: PathBuf, opts: SessionStartOptions) -> Result<StartRe
             Method::SessionStart
         },
         Some(StartParams {
+            incognito: opts.incognito,
             request_id: opts.request_id,
             task_name: opts.name,
             browser_instance_id: opts.browser,
             width: opts.width,
             height: opts.height,
-            focused: opts.focused,
+            focused: Some(opts.focused.unwrap_or(false)),
         }),
         SESSION_START_IPC_TIMEOUT,
     )
@@ -652,9 +673,28 @@ mod start_params_tests {
     use super::*;
 
     #[test]
+    fn incognito_flag_is_opt_in() {
+        use clap::Parser;
+        for (flags, expected) in [
+            (vec!["bsk", "session", "start"], false),
+            (vec!["bsk", "session", "start", "--incognito"], true),
+        ] {
+            let cli = crate::cli::Cli::try_parse_from(flags).unwrap();
+            let crate::cli::Command::Session(SessionCmd {
+                sub: SessionSub::Start(args),
+            }) = cli.command
+            else {
+                panic!("expected session start")
+            };
+            assert_eq!(args.incognito, expected);
+        }
+    }
+
+    #[test]
     fn start_params_send_task_name_without_policy_overrides() {
         for task_name in [None, Some("Check settings".to_string())] {
             let params = StartParams {
+                incognito: false,
                 request_id: None,
                 task_name: task_name.clone(),
                 browser_instance_id: None,

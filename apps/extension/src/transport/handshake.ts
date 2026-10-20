@@ -7,7 +7,7 @@ import type {
   ResponseFrame,
 } from "./types";
 
-export const PROTOCOL_VERSION = "1.3";
+export const PROTOCOL_VERSION = "1.4";
 /**
  * Extension semver, injected at build time from `package.json` via
  * Vite's `define` (see `wxt.config.ts` and `vitest.config.ts`).
@@ -138,6 +138,7 @@ function isResponseFor(msg: ProtocolFrame, id: string): boolean {
  */
 export function detectBrowserMeta(ua: string = navigator.userAgent): BrowserMeta {
   const probes: Array<[RegExp, string]> = [
+    [/YaBrowser\/([0-9.]+)/, "yandex"],
     [/Edg\/([0-9.]+)/, "edge"],
     [/OPR\/([0-9.]+)/, "opera"],
     [/Brave\/([0-9.]+)/, "brave"],

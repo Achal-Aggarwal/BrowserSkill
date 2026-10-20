@@ -4,6 +4,7 @@
 // sides without extra adapters.
 
 export type RpcId = string;
+export type { ExtractParams, ExtractResult } from "@/tools/extract/types";
 
 export type ErrorCode =
   | "unknown_method"
@@ -21,6 +22,14 @@ export type ErrorCode =
 
 /** Stable `RpcError.data.reason` values for CLI hint selection. */
 export type RpcErrorReason =
+  | "extract_params_invalid"
+  | "extract_target_stale"
+  | "extract_target_ambiguous"
+  | "extract_target_hidden"
+  | "extract_selector_invalid"
+  | "extract_structure_invalid"
+  | "extract_field_ambiguous"
+  | "extract_limit"
   | "ui_lookup_failed"
   | "task_unavailable"
   | "target_unavailable"
@@ -54,6 +63,7 @@ export type RpcErrorReason =
   | "restricted_tab_url"
   | "cdp_extension_access_denied"
   | "borrow_conflict"
+  | "incognito_borrow_disabled"
   | "borrow_in_progress"
   | "user_denied"
   | "confirmation_timeout"
@@ -766,6 +776,36 @@ export interface WaitForNavigationResult {
   tab_id: number;
   reached: WaitForNavigationReached;
   error_text?: string;
+  dialogs?: JavaScriptDialogInfo[];
+}
+
+/**
+ * Element states `wait-for-element` can wait on. `visible` / `hidden` ask about
+ * visibility; `attached` / `detached` ask about presence in the DOM.
+ * `hidden` is the opposite of `visible`: absent or attached but not visible.
+ * The `attached` result distinguishes these two observations.
+ */
+export type ElementState = "visible" | "hidden" | "attached" | "detached";
+
+export interface WaitForElementParams {
+  session_id: string;
+  ref?: string;
+  selector?: string;
+  state: ElementState;
+  tab_id?: number;
+  timeout_ms?: number;
+  poll_ms?: number;
+}
+
+export interface WaitForElementResult {
+  tab_id: number;
+  used_ref?: string;
+  used_selector?: string;
+  satisfied: boolean;
+  /** Last completed probe; null if no probe completed before timeout. */
+  attached: boolean | null;
+  visible: boolean | null;
+  elapsed_ms: number;
   dialogs?: JavaScriptDialogInfo[];
 }
 

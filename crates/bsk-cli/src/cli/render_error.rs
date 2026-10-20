@@ -57,6 +57,7 @@ pub mod reason {
     pub const TAB_NOT_ACTIVE: &str = "tab_not_active";
     pub const CDP_EXTENSION_ACCESS_DENIED: &str = "cdp_extension_access_denied";
     pub const BORROW_CONFLICT: &str = "borrow_conflict";
+    pub const INCOGNITO_BORROW_DISABLED: &str = "incognito_borrow_disabled";
     pub const SCREENSHOT_CAPTURE_FAILED: &str = "screenshot_capture_failed";
     pub const SCREENSHOT_USER_CANCELLED: &str = "user_cancelled";
     pub const SCREENSHOT_PAGE_HIDDEN: &str = "page_hidden";
@@ -337,6 +338,11 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             ),
             exit_code: base.exit_code,
         },
+        (ErrorCode::PermissionDenied, reason::INCOGNITO_BORROW_DISABLED) => RenderInfo {
+            summary: "tab borrowing is unavailable for incognito sessions and tabs",
+            hint: Some("create a new task tab with `bsk tab create <url> --session <id>`"),
+            exit_code: base.exit_code,
+        },
         (ErrorCode::PermissionDenied, reason::BORROW_CONFLICT) => RenderInfo {
             summary: "tab is borrowed by another session",
             hint: Some(
@@ -392,7 +398,7 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
         (ErrorCode::InvalidParams, reason::TARGET_NOT_FILLABLE) => RenderInfo {
             summary: "target element is not fillable",
             hint: Some(
-                "observe the page and choose an enabled, editable text input, textarea, or contenteditable; use the appropriate interaction for other control types",
+                "observe the page and choose an enabled, editable text input, textarea, or contenteditable editor root; internal paragraphs and spans are not fill targets",
             ),
             exit_code: base.exit_code,
         },
