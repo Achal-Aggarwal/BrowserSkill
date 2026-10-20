@@ -881,6 +881,23 @@ async fn forward_one(
         }
         WaitOutcome::TimeoutCleanupFailed => {
             client.pending.lock().unwrap().cancel(&rpc_id);
+            if matches!(
+                job.method,
+                Method::ToolEvaluate
+                    | Method::ToolNavigate
+                    | Method::ToolNavigateBack
+                    | Method::ToolNavigateForward
+                    | Method::ToolReload
+            ) {
+                return Err(RpcError {
+                    code: ErrorCode::Timeout,
+                    message: "page operation timed out and extension cleanup could not be confirmed; page effects may have occurred".into(),
+                    data: Some(serde_json::json!({
+                        "reason": "cancel_cleanup_timeout",
+                        "effect_state": "unknown",
+                    })),
+                });
+            }
             if job.method == Method::ToolTabBorrow {
                 return Err(unknown_borrow_error(ErrorCode::Timeout));
             }
