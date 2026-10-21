@@ -300,6 +300,17 @@ describe("tool registration", () => {
     expect(tool.description).toMatch(/unacknowledged stop/);
   });
 
+  it("exposes opt-in incognito Agent Windows in the public session schema", () => {
+    const { tools } = setup({});
+    const tool = tools.get("bsk_session")!;
+    const properties = tool.parameters.properties as Record<string, unknown> | undefined;
+    expect(properties?.incognito).toMatchObject({
+      type: "boolean",
+      description: expect.stringMatching(/Allow in incognito/),
+    });
+    expect(tool.description).toMatch(/incognito/);
+  });
+
   it("requires an action on every public tool", async () => {
     const { tools } = setup({});
     for (const name of Object.keys(EXPECTED_ACTIONS)) {
@@ -379,6 +390,21 @@ describe("session.start", () => {
     expect(calls[0].args.filter((arg) => arg === "--focus" || arg === "--no-focus")).toEqual(
       flag ? [flag] : [],
     );
+  });
+
+  it.each([
+    [undefined, false],
+    [false, false],
+    [true, true],
+  ])("maps incognito=%s to --incognito (expected %s)", async (incognito, expected) => {
+    const { tools, calls } = setup({ "session start": START_REPLY("s1") });
+    const tool = tools.get("bsk_session");
+    if (!tool) throw new Error("bsk_session not registered");
+    await tool.execute(
+      { action: "start", ...(incognito === undefined ? {} : { incognito }) },
+      makeExec(),
+    );
+    expect(calls[0].args.includes("--incognito")).toBe(expected);
   });
 
   it("maps the start reply and tracks the session as current", async () => {
