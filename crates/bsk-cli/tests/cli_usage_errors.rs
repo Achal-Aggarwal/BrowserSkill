@@ -89,6 +89,51 @@ fn misplaced_session_and_tab_flags_report_json_and_position_guidance() {
 }
 
 #[test]
+fn json_errors_keep_useful_subcommand_suggestions() {
+    for command in ["start", "restart"] {
+        for args in [
+            vec!["daemon", command, "--session", "30s", "--json"],
+            vec!["--json", "daemon", command, "--session=30s"],
+        ] {
+            let error = json_usage_error(&bsk(&args));
+            let details = error["data"]["details"].as_str().unwrap();
+            assert!(
+                details.contains("a similar argument exists: '--session-idle'"),
+                "{details}"
+            );
+            assert!(
+                details.contains(&usage(&format!(
+                    "daemon {command} --session-idle <DURATION>"
+                ))),
+                "{details}"
+            );
+            assert!(!error["hint"].as_str().unwrap().contains("after"));
+        }
+    }
+}
+
+#[test]
+fn human_errors_keep_useful_subcommand_suggestions() {
+    for command in ["start", "restart"] {
+        let output = bsk(&["daemon", command, "--session", "30s"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("a similar argument exists: '--session-idle'"),
+            "{stderr}"
+        );
+        assert!(
+            stderr.contains(&usage(&format!(
+                "daemon {command} --session-idle <DURATION>"
+            ))),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("tip: --session and --tab-id"), "{stderr}");
+    }
+}
+
+#[test]
 fn all_argument_failures_use_the_json_contract() {
     for args in [
         vec!["--json", "click"],              // missing required session

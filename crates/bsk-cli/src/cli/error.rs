@@ -172,6 +172,14 @@ fn misplaced_command_option_error(err: &clap::Error, args: &[OsString]) -> Optio
         }
         _ => return None,
     };
+    // Keep clap's option suggestions (e.g. --session-idle) and their usage.
+    // The --version suggestion is the misleading match this rewrite replaces.
+    if matches!(
+        err.get(ContextKind::SuggestedArg),
+        Some(ContextValue::String(suggested)) if suggested != "--version"
+    ) {
+        return None;
+    }
     let mut cmd = super::Cli::command();
     // Like clap, name the binary after argv[0], e.g. `bsk.exe` on Windows.
     if let Some(name) = args
