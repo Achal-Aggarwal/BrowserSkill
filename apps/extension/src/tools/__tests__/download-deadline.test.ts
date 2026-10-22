@@ -73,7 +73,16 @@ function fixture() {
     });
     onDeterminingFilename.emit(item, vi.fn());
   };
-  return { downloads, cdp, dispose, item, offer, onCreated, onChanged, onDeterminingFilename };
+  return {
+    downloads,
+    cdp,
+    dispose,
+    item,
+    offer,
+    onCreated,
+    onChanged,
+    onDeterminingFilename,
+  };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -251,7 +260,15 @@ describe("download deadlines", () => {
     const input = deferred<object>();
     const inputs: string[] = [];
     f.cdp.send = (async (_tabId, method, params) => {
-      if (method === "Runtime.evaluate") return { result: { value: "absent" } };
+      if (method === "Runtime.evaluate")
+        return {
+          result: {
+            value:
+              (params as { expression?: string })?.expression === "document.visibilityState"
+                ? "visible"
+                : "absent",
+          },
+        };
       if (method === "Page.getLayoutMetrics")
         return { cssLayoutViewport: { clientWidth: 1280, clientHeight: 720 } };
       if (method === "DOM.getContentQuads") return { quads: [[0, 0, 20, 0, 20, 20, 0, 20]] };

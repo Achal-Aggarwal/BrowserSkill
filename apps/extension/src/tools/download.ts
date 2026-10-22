@@ -10,7 +10,8 @@ import {
   type DownloadsApi,
   type NavigationTargetsApi,
 } from "./download-capture";
-import { downloadTriggerDeps } from "./download-trigger";
+import { fileTransferTriggerDeps } from "./file-transfer-trigger";
+import { withInputReady } from "./input-readiness";
 import { clickResolvedTarget, type InteractionDeps, resolveActionTarget } from "./interaction";
 import { enforceAgentWindow, isRpcError, lookupSession, resolveTargetTab } from "./shared";
 
@@ -43,7 +44,9 @@ export async function handleDownload(
     const address = await resolveActionTarget(deps.cdp, ctx, target, params, "download");
     if (isRpcError(address)) return address;
 
-    let trigger: ReturnType<typeof downloadTriggerDeps> | undefined;
+    const timeoutMs = params.timeout_ms ?? 120_000;
+    const deadline = Date.now() + timeoutMs;
+    let trigger: ReturnType<typeof fileTransferTriggerDeps> | undefined;
     const capture = await captureBrowserDownload({
       cdp: deps.cdp,
       target: address.cdpTarget,
@@ -51,12 +54,23 @@ export async function handleDownload(
       navigationTargets: deps.navigationTargets ?? chromeNavigationTargetsApi,
       browserRelativeDir: params.browser_relative_dir,
       maxByteSize: params.max_byte_size,
-      timeoutMs: params.timeout_ms ?? 120_000,
+      timeoutMs,
       signal: deps.signal,
       expectedFrameId: address.frameId,
       trigger: (markDispatched, signal) => {
-        trigger = downloadTriggerDeps(deps, signal);
-        return clickResolvedTarget(ctx, address, {}, trigger.deps, markDispatched);
+        trigger = fileTransferTriggerDeps(deps, signal);
+        const clickDeps = trigger.deps;
+        return withInputReady(
+          ctx,
+          target.tabId,
+          // Focus cleanup must remain available after the click trigger is retired.
+          { cdp: deps.cdp, signal, deadline, registerCleanup: clickDeps.registerClickCleanup },
+          (input) =>
+            clickResolvedTarget(ctx, address, {}, clickDeps, () => {
+              input.markSent();
+              markDispatched();
+            }),
+        );
       },
       cleanupTrigger: (deadline) => trigger?.cleanup(deadline) ?? Promise.resolve(),
     });
