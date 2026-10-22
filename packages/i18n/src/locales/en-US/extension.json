@@ -1,4 +1,18 @@
 {
+  "cooperation": {
+    "yielding": "Agent is yielding · Waiting for the current action to settle",
+    "label": "Shared browser control",
+    "ready": "Ready · You can interact at any time",
+    "acting": "Agent is working",
+    "human": "You are in control · Agent is yielding",
+    "editing": "You are editing · Hand back when ready",
+    "held": "Manual control · Waiting for hand-back",
+    "syncing": "Agent is syncing the page",
+    "unavailable": "Page unavailable · Agent is waiting",
+    "hold": "Keep manual control",
+    "resume": "Hand back to Agent",
+    "stop": "Stop task"
+  },
   "popup": {
     "interactionCompatibilityWarning": "Connected to an older daemon (protocol v{{cliProtocol}}). Update the CLI and daemon for full support of Automation settings.",
     "brandCategory": "Browser Automation",

@@ -1,4 +1,18 @@
 {
+  "cooperation": {
+    "yielding": "Agent está cediendo el control · Esperando a que termine la acción",
+    "label": "Control compartido del navegador",
+    "ready": "Listo · Puedes intervenir cuando quieras",
+    "acting": "Agent está trabajando",
+    "human": "Tienes el control · Agent espera",
+    "editing": "Estás editando · Devuelve el control cuando termines",
+    "held": "Control manual · Esperando la devolución",
+    "syncing": "Agent está sincronizando la página",
+    "unavailable": "Página no disponible · Agent espera",
+    "hold": "Mantener control manual",
+    "resume": "Devolver a Agent",
+    "stop": "Detener tarea"
+  },
   "popup": {
     "interactionCompatibilityWarning": "Conectado a un daemon anterior (protocolo v{{cliProtocol}}). Actualiza la CLI y el daemon para admitir completamente los ajustes de automatización.",
     "brandCategory": "Automatización del navegador",
