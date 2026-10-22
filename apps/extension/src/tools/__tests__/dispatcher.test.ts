@@ -676,6 +676,7 @@ describe("ToolDispatcher", () => {
       }
       if (method === "Runtime.evaluate") {
         const expression = (params as { expression?: string }).expression ?? "";
+        if (expression === "document.visibilityState") return { result: { value: "visible" } } as T;
         if (expression.includes('return "absent"')) {
           return { result: { value: "clear" } } as T;
         }
