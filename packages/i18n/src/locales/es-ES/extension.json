@@ -1,17 +1,27 @@
 {
   "cooperation": {
-    "yielding": "Agent está cediendo el control · Esperando a que termine la acción",
+    "yielding": "Agent está esperando",
     "label": "Control compartido del navegador",
-    "ready": "Listo · Puedes intervenir cuando quieras",
+    "ready": "Agent está listo",
     "acting": "Agent está trabajando",
-    "human": "Tienes el control · Agent espera",
-    "editing": "Estás editando · Devuelve el control cuando termines",
-    "held": "Control manual · Esperando la devolución",
-    "syncing": "Agent está sincronizando la página",
-    "unavailable": "Página no disponible · Agent espera",
-    "hold": "Mantener control manual",
+    "human": "Tienes el control",
+    "editing": "Estás editando",
+    "held": "Agent está en pausa",
+    "syncing": "Agent está sincronizando",
+    "unavailable": "Página no disponible",
+    "hold": "Pausar Agent",
     "resume": "Devolver a Agent",
-    "stop": "Detener tarea"
+    "stop": "Detener tarea",
+    "hints": {
+      "ready": "Puedes intervenir en cualquier momento",
+      "acting": "Puedes intervenir en cualquier momento",
+      "human": "Agent continúa cuando dejas de interactuar",
+      "editing": "Devuelve el control a Agent cuando termines",
+      "held": "Devuelve el control a Agent cuando estés listo",
+      "yielding": "Esperando a que termine la acción actual",
+      "syncing": "Leyendo el estado actual de la página",
+      "unavailable": "Agent ha dejado de interactuar"
+    }
   },
   "popup": {
     "interactionCompatibilityWarning": "Conectado a un daemon anterior (protocolo v{{cliProtocol}}). Actualiza la CLI y el daemon para admitir completamente los ajustes de automatización.",

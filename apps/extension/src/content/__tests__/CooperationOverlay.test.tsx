@@ -41,6 +41,9 @@ describe("CooperationOverlay", () => {
     expect(getByRole("status").textContent).toContain(
       i18n.t(`cooperation.${mode}`, { ns: "extension" }),
     );
+    expect(getByRole("status").textContent).toContain(
+      i18n.t(`cooperation.hints.${mode}`, { ns: "extension" }),
+    );
     expect(sendMessage).not.toHaveBeenCalled();
     expect(action.disabled).toBe(mode === "yielding");
     await act(async () => fireEvent.click(action));
@@ -61,13 +64,11 @@ describe("CooperationOverlay", () => {
     const { getByRole, rerender } = render(
       <CooperationOverlay state={view("human", { editing: true })} onStop={onStop} />,
     );
-    expect(getByRole("status").textContent).toBe(
-      i18n.t("cooperation.editing", { ns: "extension" }),
-    );
+    expect(getByRole("status").textContent).toBe("你正在编辑完成编辑后交给 Agent");
     rerender(
       <CooperationOverlay state={view("held", { revision: 23, editing: true })} onStop={onStop} />,
     );
-    expect(getByRole("status").textContent).toBe(i18n.t("cooperation.held", { ns: "extension" }));
+    expect(getByRole("status").textContent).toBe("Agent 已暂停准备好后交给 Agent");
     await act(async () => fireEvent.click(getByRole("button", { name: "交给 Agent" })));
     expect(sendMessage).toHaveBeenCalledExactlyOnceWith({
       kind: COOPERATION_CONTROL,

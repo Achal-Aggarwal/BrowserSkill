@@ -1,17 +1,27 @@
 {
   "cooperation": {
-    "yielding": "Agent cède la main · Fin de l’action en cours",
+    "yielding": "Agent attend",
     "label": "Contrôle partagé du navigateur",
-    "ready": "Prêt · Vous pouvez intervenir à tout moment",
+    "ready": "Agent est prêt",
     "acting": "Agent travaille",
-    "human": "Vous avez la main · Agent attend",
-    "editing": "Modification en cours · Rendez la main une fois terminé",
-    "held": "Contrôle manuel · En attente du relais",
-    "syncing": "Agent synchronise la page",
-    "unavailable": "Page indisponible · Agent attend",
-    "hold": "Garder le contrôle manuel",
+    "human": "Vous avez la main",
+    "editing": "Vous modifiez la page",
+    "held": "Agent est en pause",
+    "syncing": "Agent synchronise",
+    "unavailable": "Page indisponible",
+    "hold": "Mettre Agent en pause",
     "resume": "Rendre la main à Agent",
-    "stop": "Arrêter la tâche"
+    "stop": "Arrêter la tâche",
+    "hints": {
+      "ready": "Vous pouvez intervenir à tout moment",
+      "acting": "Vous pouvez intervenir à tout moment",
+      "human": "Agent reprend quand vous cessez d’interagir",
+      "editing": "Rendez la main à Agent quand vous êtes prêt",
+      "held": "Rendez la main à Agent quand vous êtes prêt",
+      "yielding": "L’action en cours doit se terminer",
+      "syncing": "Lecture de l’état actuel de la page",
+      "unavailable": "Agent a cessé d’interagir"
+    }
   },
   "popup": {
     "interactionCompatibilityWarning": "Connecté à un daemon plus ancien (protocole v{{cliProtocol}}). Mettez à jour le CLI et le daemon pour profiter pleinement des paramètres d'automatisation.",
