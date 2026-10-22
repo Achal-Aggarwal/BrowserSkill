@@ -53,6 +53,7 @@ export function fileTransferTriggerDeps(deps: InteractionDeps, signal?: AbortSig
     send: (tabId, method, params) => send({ tabId }, method, params),
     sendToTarget: send,
     trackSessionTab: deps.cdp.trackSessionTab?.bind(deps.cdp),
+    verifyPointerTarget: deps.cdp.verifyPointerTarget?.bind(deps.cdp),
     dialogCursor: deps.cdp.dialogCursor?.bind(deps.cdp),
     dialogsSince: deps.cdp.dialogsSince?.bind(deps.cdp),
     getAttachmentId: deps.cdp.getAttachmentId?.bind(deps.cdp),

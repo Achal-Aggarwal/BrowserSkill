@@ -1,4 +1,18 @@
 {
+  "cooperation": {
+    "yielding": "Agent gibt die Steuerung ab · Aktuelle Aktion wird beendet",
+    "label": "Gemeinsame Browsersteuerung",
+    "ready": "Bereit · Sie können jederzeit eingreifen",
+    "acting": "Agent arbeitet",
+    "human": "Sie steuern · Agent wartet",
+    "editing": "Sie bearbeiten · Danach an Agent übergeben",
+    "held": "Manuelle Steuerung · Übergabe wird erwartet",
+    "syncing": "Agent synchronisiert die Seite",
+    "unavailable": "Seite nicht verfügbar · Agent wartet",
+    "hold": "Manuell weiterarbeiten",
+    "resume": "An Agent übergeben",
+    "stop": "Aufgabe stoppen"
+  },
   "popup": {
     "interactionCompatibilityWarning": "Mit einem älteren Daemon verbunden (Protokoll v{{cliProtocol}}). Aktualisieren Sie CLI und Daemon, um die Automatisierungseinstellungen vollständig zu unterstützen.",
     "brandCategory": "Browser-Automatisierung",

@@ -20,6 +20,8 @@ let downloadActive = false;
 export type { DownloadsApi, NavigationTargetsApi } from "./download-capture";
 
 export interface DownloadDeps extends InteractionDeps {
+  /** Human input revokes the trigger; explicit cancellation also stops receipt collection. */
+  completionSignal?: AbortSignal;
   downloads?: DownloadsApi;
   navigationTargets?: NavigationTargetsApi;
 }
@@ -55,9 +57,11 @@ export async function handleDownload(
       browserRelativeDir: params.browser_relative_dir,
       maxByteSize: params.max_byte_size,
       timeoutMs,
-      signal: deps.signal,
+      signal: deps.completionSignal ?? deps.signal,
+      inputSignal: deps.signal,
       expectedFrameId: address.frameId,
-      trigger: (markDispatched, signal) => {
+      trigger: (markDispatched, captureSignal) => {
+        const signal = deps.signal ? AbortSignal.any([captureSignal, deps.signal]) : captureSignal;
         trigger = fileTransferTriggerDeps(deps, signal);
         const clickDeps = trigger.deps;
         return withInputReady(

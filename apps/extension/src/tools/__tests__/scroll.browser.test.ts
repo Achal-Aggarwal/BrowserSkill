@@ -2,10 +2,13 @@
 // Opt in with BSK_SCROLL_CHROME=/path/to/chrome. Uses an isolated browser/profile.
 import { describe, expect, it } from "vitest";
 import type { CdpFrame, CdpFrameGraph, CdpTarget } from "@/browser-driver/frame-graph";
+import { pointerTargetValidator } from "@/cooperation/pointer-target";
 import { SessionManager } from "@/session-manager/manager";
+import { resolveNodeGeometry } from "../frame-geometry";
 import type { ViewportRect } from "../geometry";
 import { handleScrollTo } from "../scroll";
 import type { CdpRunner } from "../shared";
+import { isRpcError } from "../shared";
 import { pointBelongsToTarget } from "../target-hit";
 
 type Send = <T = Record<string, unknown>>(
@@ -321,8 +324,31 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("real browser scroll-to", () => 
         const frames = await h.loadFrames();
         expect(frames.length).toBe(fixture === "snapshot-coordinates" ? 5 : 3);
         for (const frame of frames) {
-          await h.ref(frame);
+          const backendNodeId = await h.ref(frame);
           const result = await h.scroll({ ref: "e1" });
+          const geometry = await resolveNodeGeometry(h.cdp, 4, {
+            target: frame.target,
+            backendNodeId,
+            frameId: frame.frameId,
+          });
+          expect(isRpcError(geometry)).toBe(false);
+          if (isRpcError(geometry)) throw new Error(geometry.message);
+          await pointerTargetValidator(h.cdp)(
+            { tabId: 4, cdpTarget: frame.target, backendNodeId, frameId: frame.frameId },
+            geometry.actionPoint,
+          );
+          if (frame.target.sessionId) {
+            await h.evaluate(
+              "window.frameCover=document.createElement('div');frameCover.style='position:fixed;inset:0;z-index:99999;background:white';document.body.append(frameCover)",
+            );
+            await expect(
+              pointerTargetValidator(h.cdp)(
+                { tabId: 4, cdpTarget: frame.target, frameId: frame.frameId, backendNodeId },
+                geometry.actionPoint,
+              ),
+            ).rejects.toThrow(/covered/);
+            await h.evaluate("frameCover.remove()");
+          }
           // Independent DOM oracle: CSS border boxes plus this fixture's known
           // axis-aligned iframe scales. Re-read after each scroll changes layout.
           let rect = await h.evaluate<ViewportRect>(
@@ -403,10 +429,7 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("native target hit testing", () 
             frameId: frame.frameId,
             backendNodeId,
           };
-          const verify = (
-            target: Parameters<typeof pointBelongsToTarget>[1],
-            point: { x: number; y: number },
-          ) => pointBelongsToTarget(h.cdp, target, point.x, point.y, "hit-oracle");
+          const verify = pointerTargetValidator(h.cdp);
           const point = await h.evaluate<{ x: number; y: number }>(
             "(()=>{const r=document.querySelector('#probe').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()",
           );
@@ -434,7 +457,10 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("native target hit testing", () 
             h.rootSession,
           );
           expect(node.pseudoType).toBe(pseudo);
-          expect(await verify(target, point)).toBe(true);
+          expect(await pointBelongsToTarget(h.cdp, target, point.x, point.y, "hit-oracle")).toBe(
+            true,
+          );
+          await verify(target, point);
           for (const type of ["mousePressed", "mouseReleased"])
             await h.send(
               "Input.dispatchMouseEvent",
@@ -443,7 +469,10 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("native target hit testing", () 
             );
           expect(await h.evaluate("window.hits")).toBe(1);
           await h.evaluate("document.body.insertAdjacentHTML('beforeend','<div id=cover></div>')");
-          expect(await verify(target, point)).toBe(false);
+          expect(await pointBelongsToTarget(h.cdp, target, point.x, point.y, "hit-oracle")).toBe(
+            false,
+          );
+          await expect(verify(target, point)).rejects.toThrow(/no longer hits/);
           expect(await h.evaluate("window.hits")).toBe(1);
         }
       },
@@ -469,10 +498,7 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("native target hit testing", () 
         const [frame] = await h.loadFrames();
         const backendNodeId = await h.ref(frame);
         const target = { tabId: 4, cdpTarget: frame.target, frameId: frame.frameId, backendNodeId };
-        const verify = (
-          target: Parameters<typeof pointBelongsToTarget>[1],
-          point: { x: number; y: number },
-        ) => pointBelongsToTarget(h.cdp, target, point.x, point.y, "hit-oracle");
+        const verify = pointerTargetValidator(h.cdp);
         await h.evaluate("scrollTo(600,900)");
         const point = await h.evaluate<{ x: number; y: number }>(
           "(()=>{const r=document.querySelector('#probe').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()",
@@ -486,7 +512,10 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("native target hit testing", () 
             await h.send("Target.activateTarget", { targetId: other });
           }
           try {
-            expect(await verify(target, point)).toBe(true);
+            expect(await pointBelongsToTarget(h.cdp, target, point.x, point.y, "hit-oracle")).toBe(
+              true,
+            );
+            await verify(target, point);
             for (const type of ["mousePressed", "mouseReleased"])
               await h.send(
                 "Input.dispatchMouseEvent",
@@ -498,13 +527,18 @@ describe.skipIf(!process.env.BSK_SCROLL_CHROME)("native target hit testing", () 
             await h.evaluate(
               `window.cover=document.createElement('div'); cover.style='position:fixed;inset:0;background:white;z-index:99999';document.body.append(cover)`,
             );
-            expect(await verify(target, point)).toBe(false);
+            expect(await pointBelongsToTarget(h.cdp, target, point.x, point.y, "hit-oracle")).toBe(
+              false,
+            );
+            await expect(verify(target, point)).rejects.toThrow(/covered|no longer hits/);
             expect(await h.evaluate("window.hits")).toBe(background ? 2 : 1);
             await h.evaluate("cover.remove()");
           } finally {
             if (other) await h.send("Target.closeTarget", { targetId: other });
           }
         }
+        await h.evaluate("document.querySelector('#probe').style.left='950px'");
+        await expect(verify(target, point)).rejects.toThrow(/moved/);
         expect(await h.evaluate("window.hits")).toBe(2);
       },
       zoom,

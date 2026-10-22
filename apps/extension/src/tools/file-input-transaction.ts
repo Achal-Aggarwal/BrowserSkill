@@ -401,7 +401,7 @@ export async function uploadThroughActivatedFileInput(
       try {
         await waitBounded(
           callOnTrigger(
-            options,
+            { ...options, cdp: options.cdp.resourceCleanup ?? options.cdp },
             triggerObjectId,
             `function(key) {
               const owner = this.ownerDocument.defaultView;

@@ -1,4 +1,18 @@
 {
+  "cooperation": {
+    "yielding": "Agent cède la main · Fin de l’action en cours",
+    "label": "Contrôle partagé du navigateur",
+    "ready": "Prêt · Vous pouvez intervenir à tout moment",
+    "acting": "Agent travaille",
+    "human": "Vous avez la main · Agent attend",
+    "editing": "Modification en cours · Rendez la main une fois terminé",
+    "held": "Contrôle manuel · En attente du relais",
+    "syncing": "Agent synchronise la page",
+    "unavailable": "Page indisponible · Agent attend",
+    "hold": "Garder le contrôle manuel",
+    "resume": "Rendre la main à Agent",
+    "stop": "Arrêter la tâche"
+  },
   "popup": {
     "interactionCompatibilityWarning": "Connecté à un daemon plus ancien (protocole v{{cliProtocol}}). Mettez à jour le CLI et le daemon pour profiter pleinement des paramètres d'automatisation.",
     "brandCategory": "Automatisation du navigateur",
