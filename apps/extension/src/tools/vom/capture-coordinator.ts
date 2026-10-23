@@ -94,12 +94,47 @@ async function releaseAccessibility(
   });
 }
 
+/** Never queue cleanup behind a timed-out read. A pending root command gates
+ * every frame on the tab; a child command gates only its original target. */
+function forgetPendingAccessibility(
+  enabled: Map<CdpTarget, string | undefined>,
+  error: unknown,
+): void {
+  if (!(error instanceof CdpReadTimeoutError)) return;
+  for (const target of enabled.keys())
+    if (!error.sessionId || target.sessionId === error.sessionId) enabled.delete(target);
+}
+
 export async function captureObservationFacts<T extends FrameOwnedAxNode>(
   cdp: CdpRunner,
   tabId: number,
   signal?: AbortSignal,
   pageUrl?: string,
   options: { includeVisualFacts?: boolean } = {},
+): Promise<ObservationFacts<T>> {
+  // Cleanup must run after identity and geometry reads as well as AX. A
+  // cleanup timeout closes the target's read gate until Chrome replies.
+  const axEnabled = new Map<CdpTarget, string | undefined>();
+  let facts: ObservationFacts<T>;
+  try {
+    facts = await collectObservationFacts<T>(cdp, tabId, axEnabled, signal, pageUrl, options);
+  } catch (error) {
+    forgetPendingAccessibility(axEnabled, error);
+    throw error;
+  } finally {
+    await releaseAccessibility(cdp, tabId, axEnabled);
+  }
+  throwCaptureAborted(signal);
+  return facts;
+}
+
+async function collectObservationFacts<T extends FrameOwnedAxNode>(
+  cdp: CdpRunner,
+  tabId: number,
+  axEnabled: Map<CdpTarget, string | undefined>,
+  signal: AbortSignal | undefined,
+  pageUrl: string | undefined,
+  options: { includeVisualFacts?: boolean },
 ): Promise<ObservationFacts<T>> {
   const profile = options.includeVisualFacts ? VISUAL_SNAPSHOT : BASIC_SNAPSHOT;
   const startedAt = Date.now();
@@ -108,6 +143,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
   try {
     graph = await cdp.getFrameGraph?.(tabId);
   } catch (error) {
+    forgetPendingAccessibility(axEnabled, error);
     if (isCaptureAbort(error)) throw error;
   }
   throwCaptureAborted(signal);
@@ -152,11 +188,6 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
   const unavailable = (batch: TargetBatch<T>, stage: CaptureIssue["stage"], frameId?: string) =>
     issues.push({ target: batch.target, frameId, stage, reason: "capture-unavailable" });
   let firstFailure: unknown;
-  // Targets where this capture enabled AX, with the attachment it was sent on.
-  // Each releases AX once its trees are read, or when the capture fails or is
-  // cancelled before that.
-  const axEnabled = new Map<CdpTarget, string | undefined>();
-  const releaseAx = () => releaseAccessibility(cdp, tabId, axEnabled);
   const stopped = new Set<TargetBatch<T>>();
   const isolateChildTimeout = (error: unknown, batch: TargetBatch<T>): boolean => {
     if (
@@ -230,6 +261,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
         for (const frame of batch.frames)
           if (!present.has(frame.frameId)) unavailable(batch, "dom", frame.frameId);
       } catch (error) {
+        forgetPendingAccessibility(axEnabled, error);
         throwCaptureAborted(signal);
         if (isolateChildTimeout(error, batch)) return;
         if (isCaptureAbort(error)) throw error;
@@ -250,6 +282,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
         throwCaptureAborted(signal);
         await scoped.send(tabId, "Accessibility.enable", {});
       } catch (error) {
+        forgetPendingAccessibility(axEnabled, error);
         throwCaptureAborted(signal);
         if (isolateChildTimeout(error, batch)) return;
         if (isCaptureAbort(error)) throw error;
@@ -260,10 +293,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
       axEnabled.set(batch.target, cdp.getAttachmentId?.(tabId));
     },
     signal,
-  ).catch(async (error: unknown) => {
-    await releaseAx();
-    throw error;
-  });
+  );
 
   // Schedule AX by frame across all ready targets, rather than nesting pools.
   // Keep result slots in source order even when CDP replies arrive out of order.
@@ -286,8 +316,8 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
         throwCaptureAborted(signal);
         task.result = { frame, nodes: result.nodes ?? [] };
       } catch (error) {
+        forgetPendingAccessibility(axEnabled, error);
         // Chrome may still be running this read; queue no cleanup behind it.
-        if (error instanceof CdpReadTimeoutError) axEnabled.delete(batch.target);
         throwCaptureAborted(signal);
         if (isolateChildTimeout(error, batch)) return;
         if (isCaptureAbort(error)) throw error;
@@ -296,7 +326,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
       }
     },
     signal,
-  ).finally(releaseAx);
+  );
   for (const task of axTasks) if (task.result) task.batch.ax.push(task.result);
 
   // A snapshot claim outranks an old graph hint. Conflicting actual claims
@@ -365,6 +395,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
         try {
           verified = await verifyDocumentIdentity(cdp, identity, signal);
         } catch (error) {
+          forgetPendingAccessibility(axEnabled, error);
           throwCaptureAborted(signal);
           if (!isolateChildTimeout(error, batch)) throw error;
           for (const id of unavailableFrameIds) invalid.add(id);
@@ -393,6 +424,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
       const measured = cssViewport(await geometry.layoutMetrics({ tabId }));
       viewport = { width: measured.width, height: measured.height };
     } catch (error) {
+      forgetPendingAccessibility(axEnabled, error);
       throwCaptureAborted(signal);
       if (error instanceof CdpReadTimeoutError) layoutTimedOut = true;
       else if (isCaptureAbort(error)) throw error;
@@ -425,6 +457,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
               profile,
             );
           } catch (error) {
+            forgetPendingAccessibility(axEnabled, error);
             throwCaptureAborted(signal);
             if (!isolateChildTimeout(error, batch)) throw error;
           }

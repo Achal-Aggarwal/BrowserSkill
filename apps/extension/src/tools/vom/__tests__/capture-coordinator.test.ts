@@ -1672,9 +1672,9 @@ describe("Accessibility domain lifetime", () => {
       "Accessibility.getFullAXTree",
       "Accessibility.disable",
     ]);
-    // Released before the identity and geometry phases, not at the end.
-    expect(logs.findIndex((call) => call.method === "Accessibility.disable")).toBeLessThan(
-      logs.findIndex((call) => call.method === "Page.createIsolatedWorld"),
+    // Cleanup follows the final identity check after geometry collection.
+    expect(logs.findIndex((call) => call.method === "Accessibility.disable")).toBeGreaterThan(
+      logs.findLastIndex((call) => call.method === "Page.createIsolatedWorld"),
     );
   });
 
