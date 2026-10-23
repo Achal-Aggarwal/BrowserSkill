@@ -722,13 +722,14 @@ async fn handle_tool_dispatch(
     // serial busy lock — finishing the recording unblocks await.
     let independent_control = method == Method::ToolCooperate
         && params.get("action").and_then(Value::as_str) != Some("enable");
-    let outcome = if independent_control || matches!(
-        method,
-        Method::ToolRecordStop
-            | Method::ToolDialogStatus
-            | Method::ToolDialogAccept
-            | Method::ToolDialogDismiss
-    ) {
+    let outcome = if independent_control
+        || matches!(
+            method,
+            Method::ToolRecordStop
+                | Method::ToolDialogStatus
+                | Method::ToolDialogAccept
+                | Method::ToolDialogDismiss
+        ) {
         state
             .tool_queues
             .dispatch_unlocked(&session_id, method.clone(), params, timeout, Some(entry))

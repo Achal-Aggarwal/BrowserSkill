@@ -25,3 +25,14 @@ Results are bounded to 4 MiB and retained for up to 5 minutes (64 operation slot
 A 60-second unanswered-dialog deadline rejects the modal and fails the operation;
 cancellation cannot undo page effects. Disconnect/expired identities must not be
 used to replay an action with unknown effects. Requires protocol 1.5 components.
+
+For a suspended `bsk download`, `completed` means the browser download was
+captured, not that its original `--out` was saved. After deciding the dialog,
+use `bsk operation await <operation-id> --session <id> --out <path> --json`
+to save the retained bytes; pass `--overwrite` only to replace an existing file.
+The initial error's `download_output.resume_argv` preserves the original absolute
+output path and overwrite choice. `result.saved: true` confirms the write.
+Without `--out`, await only retrieves the result (`saved: false`); repeated await
+never triggers another download. Retained downloads remain available until their
+transfer expires or the session ends. `session stop` dismisses pending dialogs
+as part of teardown, including dialogs opened asynchronously after an action.

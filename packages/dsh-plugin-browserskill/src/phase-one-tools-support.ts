@@ -172,6 +172,14 @@ export function registerPhaseOneSupportTools(
             description: "Exact prompt input, only for dialog-accept; an empty string is valid.",
           },
           waitMs: { type: "integer", description: "operation-await wait, 0..60000 ms." },
+          output: {
+            type: "string",
+            description: "operation-await: save a retained download to this local path.",
+          },
+          overwrite: {
+            type: "boolean",
+            description: "Allow replacing operation-await's download destination.",
+          },
         },
         output: {
           schema: { type: "json" },
@@ -200,6 +208,17 @@ export function registerPhaseOneSupportTools(
             if (action !== "operation-await" || args.waitMs < 0 || args.waitMs > 60000)
               throw new Error("waitMs is only valid for operation-await and must be 0..60000");
             cmd.push("--wait-ms", String(args.waitMs));
+          }
+          if (args.output !== undefined) {
+            if (action !== "operation-await")
+              throw new Error("output is only valid for operation-await");
+            requireNonEmpty(args.output, "output");
+            cmd.push("--out", args.output);
+          }
+          if (args.overwrite) {
+            if (action !== "operation-await" || args.output === undefined)
+              throw new Error("overwrite requires operation-await output");
+            cmd.push("--overwrite");
           }
           return (await runtime.run(
             exec,

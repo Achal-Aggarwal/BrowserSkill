@@ -374,6 +374,14 @@ const BROWSER_TOOL_SPECS: BrowserToolSpec[] = [
         description: "Exact prompt input for dialog-accept; empty string is valid.",
       },
       waitMs: { type: "integer", description: "operation-await wait, 0..60000 ms." },
+      output: {
+        type: "string",
+        description: "operation-await: save a retained download to this local path.",
+      },
+      overwrite: {
+        type: "boolean",
+        description: "Allow replacing operation-await's download destination.",
+      },
       tabId: TAB_ID_PARAM,
       width: { type: "integer", description: "Window/viewport width." },
       height: { type: "integer", description: "Window/viewport height." },

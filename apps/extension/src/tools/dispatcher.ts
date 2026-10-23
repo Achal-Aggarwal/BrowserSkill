@@ -372,7 +372,8 @@ export class ToolDispatcher {
       const blocked = operationParams?.session_id
         ? this.pendingForSession(operationParams.session_id)
         : undefined;
-      if (!dialogControl && blocked) {
+      const stopsSession = req.method === "tool.session_stop";
+      if (!dialogControl && !stopsSession && blocked) {
         body = {
           id: req.id,
           error: {
@@ -414,7 +415,8 @@ export class ToolDispatcher {
           /* The daemon still has the original operation metadata. */
         }
         try {
-          if (!dialogControl) debugTicket = await this.debug?.before(req, ac.signal);
+          if (!dialogControl && !stopsSession)
+            debugTicket = await this.debug?.before(req, ac.signal);
         } catch {
           /* Evidence must not block the operation. */
         }
@@ -427,7 +429,11 @@ export class ToolDispatcher {
               this.onAgentTabClaimed,
               ac.signal,
             )
-          : await this.invoke(req, ac.signal);
+          : stopsSession && operationParams?.session_id
+            ? await this.withDialogCleanup(operationParams.session_id, () =>
+                this.invoke(req, ac.signal),
+              )
+            : await this.invoke(req, ac.signal);
         this.debug?.after(debugTicket, isRpcError(result) ? result.message : undefined);
         debugTicket = undefined;
         if (isRpcError(result)) {
@@ -520,6 +526,26 @@ export class ToolDispatcher {
     }
   }
 
+  /** Teardown must also dismiss dialogs opened after their initiating action
+   * returned, including a chained dialog resumed by the first dismissal. */
+  private withDialogCleanup(sessionId: string, stop: () => Promise<unknown>): Promise<unknown> {
+    const owned = (tabId: number) => this.sessions.findControllingSession(tabId) === sessionId;
+    const dismiss = (id: string) => this.cdp?.resolveDialog?.(id, false).catch(() => {});
+    const subscription = this.cdp?.onDialogChanged?.((tabId, dialog) => {
+      if (dialog && owned(tabId)) void dismiss(dialog.id);
+    });
+    const pending = (this.cdp?.pendingDialogs?.() ?? []).filter((dialog) => owned(dialog.tab_id));
+    if (!subscription && pending.length === 0) return stop();
+    return (async () => {
+      try {
+        await Promise.all(pending.map((dialog) => dismiss(dialog.id)));
+        return await stop();
+      } finally {
+        subscription?.dispose();
+      }
+    })();
+  }
+
   private invoke(
     req: RequestFrame,
     signal: AbortSignal,
@@ -527,6 +553,8 @@ export class ToolDispatcher {
   ): Promise<unknown> {
     const run = (cdp = this.cdp, operationSignal = signal, completionSignal = operationSignal) =>
       this.invokeTool(req, operationSignal, onInputSent, cdp, completionSignal);
+    // Modal decisions must stay reachable while cooperation pauses page actions.
+    if (req.method.startsWith("tool.dialog_")) return run();
     if (req.method === "tool.cooperate" && this.cooperation && this.cdp) {
       const cdp = this.cdp;
       return this.releaseHoverLatch((req.params as { session_id: string }).session_id).then(() =>
