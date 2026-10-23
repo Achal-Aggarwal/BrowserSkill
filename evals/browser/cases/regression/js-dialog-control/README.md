@@ -1,10 +1,11 @@
 # Agent-controlled JavaScript dialogs
 
-This opt-in regression uses a real, visible Chrome for Testing window with the
+This regression uses a real, visible Chrome for Testing window with the
 production MV3 extension installed. Every answer is sent through the actual
 `bsk` CLI → daemon IPC → extension WebSocket → `chrome.debugger` path. The remote
-CDP connection only starts/discovers the isolated browser. It never answers a
-dialog. No personal Chrome profile or shared daemon is used.
+CDP connection handles setup, independent human input on the control toolbar,
+and page-state assertions. It never answers a dialog. No personal Chrome profile
+or shared daemon is used.
 
 ## Run
 
@@ -24,15 +25,17 @@ build paths. `BSK_DIALOG_OUTPUT` defaults to the ignored
 `evals/browser/results/js-dialog-control` directory. `BSK_DIALOG_TEST_TIMEOUT=1`
 adds the real 60-second unanswered-dialog test; omit it for the shorter run.
 
-On macOS, optional screenshots use `BSK_DIALOG_SCREENSHOT_HELPER` pointing to the
-Codex screenshot skill's `take_screenshot.py`, after granting Screen Recording.
+On macOS, optional screenshots use `BSK_DIALOG_SCREENSHOT_HELPER` pointing to a
+compatible `take_screenshot.py` window-capture helper, after granting Screen Recording.
 It captures only the owned Chrome for Testing window titled
 `BrowserSkill Dialog Control`. Screenshots are raw window captures.
 
 The runner writes the complete CLI transcript, browser version, test timestamp,
 tested revision (`BSK_DIALOG_REVISION`), a debug export, and any screenshots.
-Debug capture remains enabled during decisions, exercising the control path
-while renderer-dependent debug hooks would otherwise block.
+Page mutations obtain a fresh `cooperate sync` context. Dialog decisions and
+result retrieval do not synchronize the blocked renderer. Debug capture remains
+enabled during decisions, exercising the control path while renderer-dependent
+debug hooks would otherwise block.
 
 ## Assertions
 
@@ -50,11 +53,17 @@ while renderer-dependent debug hooks would otherwise block.
 | Another session | Cannot see, answer, or retrieve the first session's dialog |
 | Asynchronous prompt | Status discovers it; a new ordinary action is rejected with `dispatched: false` and has no side effects |
 | Unanswered dialog | Rejects at its 60-second deadline; original operation fails; no implicit confirmation or replay |
+| Suspended download | Saves exact bytes using the returned recovery command; protects existing output, supports overwrite and another destination, and clicks once |
+| Human holds control | A native toolbar click sets `held`; accepting the pending confirmation is refused without closing it; status/dismissal remain available and a fresh decision succeeds after resume |
+| Asynchronous/chained dialogs during teardown | Session stop dismisses the dialogs and removes the fresh session and its owned page |
 
 This is an executable regression with agent-selected test answers. It verifies
 that the agent has the controls to decide; it does not benchmark how an LLM
 chooses an answer on arbitrary websites. DSH model-facing action routing and
 preservation of receipt identities have separate plugin tests.
+
+The CI browser-video job also builds the isolated dialog extension and runs this
+regression under a virtual display, including the real 60-second decision deadline.
 
 ## Decision example
 

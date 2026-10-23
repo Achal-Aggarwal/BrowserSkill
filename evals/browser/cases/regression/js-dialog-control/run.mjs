@@ -28,7 +28,7 @@ async function cli(args, expectedCode = 0) {
   let result;
   try {
     result = {
-      ...(await exec(bsk, [...args, "--json"], {
+      ...(await exec(bsk, args.includes("--json") ? args : [...args, "--json"], {
         env,
         timeout: 75000,
         maxBuffer: 8 * 1024 * 1024,
@@ -133,8 +133,14 @@ try {
       const sessionArgs = ["--session", session];
       await cli(["debug", "start", ...sessionArgs, "--name", "JS dialog control E2E"]);
       await cli(["navigate", url, ...sessionArgs]);
+      const action = async (args, expectedCode = 0) => {
+        if (baseline) return cli([...args, ...sessionArgs], expectedCode);
+        const context = await cli(["cooperate", "sync", ...sessionArgs]);
+        assert(context.context_id, JSON.stringify(context));
+        return cli([...args, ...sessionArgs, "--context", context.context_id], expectedCode);
+      };
       const evaluate = (expression, expectedCode = 0) =>
-        cli(["evaluate", expression, ...sessionArgs], expectedCode);
+        action(["evaluate", expression], expectedCode);
       const pending = async (expression) => {
         const reply = await evaluate(expression, 6);
         assert.equal(reply.code, "dialog_pending");
@@ -171,7 +177,7 @@ try {
         assert.equal((await evaluate("proofState.confirmCalls")).value, 1);
         console.log("PASS confirm dismiss + repeat result retrieval: action ran once");
 
-        const click = await cli(["click", "#confirm", ...sessionArgs], 6);
+        const click = await action(["click", "#confirm"], 6);
         assert.equal(click.data.dialog.type, "confirm");
         await decide(click.data.dialog, true);
         assert.equal((await result(click.data.operation_id)).state, "completed");
@@ -220,8 +226,8 @@ try {
         });
         console.log("PASS chained dialogs share original operation; stale decision rejected");
 
-        await cli(["click", "#arm", ...sessionArgs]);
-        const navigation = await cli(["navigate", `${url}destination`, ...sessionArgs], 6);
+        await action(["click", "#arm"]);
+        const navigation = await action(["navigate", `${url}destination`], 6);
         assert.equal(navigation.data.dialog.type, "beforeunload");
         await screenshot("beforeunload-pending");
         await decide(navigation.data.dialog, false);
@@ -269,7 +275,8 @@ try {
           assert.equal(status.dialogs.length, 1);
           return status.dialogs[0];
         });
-        const blocked = await evaluate("runConfirm()", 6);
+        // Do not synchronize a blocked renderer: this verifies refusal before dispatch.
+        const blocked = await cli(["evaluate", "runConfirm()", ...sessionArgs], 6);
         assert.equal(blocked.data.dispatched, false);
         assert.equal(blocked.data.operation_id, undefined);
         await decide(asynchronous, false);
@@ -279,15 +286,125 @@ try {
           "PASS asynchronous modal discovered; new ordinary action rejected before dispatch",
         );
 
-        await cli(["click", "#arm", ...sessionArgs]);
-        const leave = await cli(["navigate", `${url}destination`, ...sessionArgs], 6);
+        await action(["click", "#arm"]);
+        const leave = await action(["navigate", `${url}destination`], 6);
         await decide(leave.data.dialog, true);
         const arrived = await result(leave.data.operation_id);
         assert.equal(arrived.state, "completed");
         assert.equal(arrived.result.final_url, `${url}destination`);
-        await cli(["navigate", url, ...sessionArgs]);
+        await action(["navigate", url]);
         console.log(
           "PASS beforeunload leave: original navigation completes after agent acceptance",
+        );
+
+        const downloadPath = join(output, `download-${session}.txt`);
+        const download = await action(["download", "#download", "--out", downloadPath], 6);
+        assert.equal(download.data.dialog.type, "confirm");
+        await decide(download.data.dialog, true);
+        const captured = await result(download.data.operation_id);
+        assert.equal(captured.state, "completed");
+        assert.equal(captured.result.saved, false);
+        await assert.rejects(readFile(downloadPath), { code: "ENOENT" });
+        const saved = await cli(download.data.download_output.resume_argv.slice(1));
+        assert.equal(saved.result.saved, true);
+        assert.equal(await readFile(downloadPath, "utf8"), "BrowserSkill dialog download\n");
+        await cli(
+          ["operation", "await", download.data.operation_id, ...sessionArgs, "--out", downloadPath],
+          2,
+        );
+        await cli([
+          "operation",
+          "await",
+          download.data.operation_id,
+          ...sessionArgs,
+          "--out",
+          downloadPath,
+          "--overwrite",
+        ]);
+        const secondPath = join(output, `download-${session}-again.txt`);
+        await cli([
+          "operation",
+          "await",
+          download.data.operation_id,
+          ...sessionArgs,
+          "--out",
+          secondPath,
+        ]);
+        assert.equal(await readFile(secondPath, "utf8"), "BrowserSkill dialog download\n");
+        assert.equal((await result(download.data.operation_id)).result.saved, false);
+        assert.equal((await evaluate("proofState.downloadCalls")).value, 1);
+        console.log(
+          "PASS download continuation: exact bytes, overwrite protection, repeated retrieval and one click",
+        );
+
+        // An independent native-input actor holds the real toolbar. All dialog
+        // decisions still travel through the CLI and the installed extension.
+        const page = (await send("Target.getTargets")).targetInfos.find(
+          (target) => target.type === "page" && target.url === url,
+        );
+        assert(page, "Owned fixture page not found");
+        const { sessionId: pageSession } = await send("Target.attachToTarget", {
+          targetId: page.targetId,
+          flatten: true,
+        });
+        await send("Page.bringToFront", {}, pageSession);
+        const pageRead = async (expression) => {
+          const reply = await send(
+            "Runtime.evaluate",
+            { expression, returnByValue: true },
+            pageSession,
+          );
+          assert(!reply.exceptionDetails, JSON.stringify(reply));
+          return reply.result.value;
+        };
+        const toolbarPoint = () =>
+          pageRead(`(() => {
+          const button = document.querySelector('browser-skill-overlay')?.shadowRoot.querySelector('[data-slot=cooperation-toolbar] button');
+          if (!button) return null;
+          const r = button.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        })()`);
+        const humanClick = async (point) => {
+          for (const type of ["mousePressed", "mouseReleased"])
+            await send(
+              "Input.dispatchMouseEvent",
+              { type, button: "left", clickCount: 1, ...point },
+              pageSession,
+            );
+        };
+        const holdPoint = await eventually(async () => {
+          const point = await toolbarPoint();
+          assert(point);
+          return point;
+        });
+        await evaluate(
+          "window.heldDecision = null; setTimeout(() => { window.heldDecision = confirm('Confirm while user holds control?'); }, 5000); 'scheduled'",
+        );
+        await humanClick(holdPoint);
+        const held = await cli(["cooperate", "status", ...sessionArgs]);
+        assert.equal(held.state.mode, "held", JSON.stringify(held));
+        const heldDialog = await eventually(async () => {
+          const status = await cli(["dialog", "status", ...sessionArgs]);
+          assert.equal(status.dialogs.length, 1);
+          return status.dialogs[0];
+        });
+        const denied = await cli(["dialog", "accept", heldDialog.id, ...sessionArgs], 1);
+        assert.equal(denied.code, "permission_denied");
+        assert.equal(denied.data.reason, "control_authority_required");
+        assert.equal(
+          (await cli(["dialog", "status", ...sessionArgs])).dialogs[0].id,
+          heldDialog.id,
+        );
+        await decide(heldDialog, false);
+        assert.equal(await pageRead("window.heldDecision"), false);
+        await humanClick(await toolbarPoint());
+        const resumed = await cli(["cooperate", "wait", ...sessionArgs, "--timeout-ms", "3000"]);
+        assert.equal(resumed.ready, true, JSON.stringify(resumed));
+        receipt = await pending("runPrompt()");
+        await decide(receipt.dialog, true, "Resumed decision");
+        assert.equal((await result(receipt.operation_id)).result.value, "Resumed decision");
+        console.log(
+          "PASS human hold rejects acceptance, permits status/dismissal, and resume permits a fresh decision",
         );
 
         if (process.env.BSK_DIALOG_TEST_TIMEOUT === "1") {
@@ -309,6 +426,39 @@ try {
       const debugExport = `website-debug-${session}.json`;
       await cli(["debug", "export", ...sessionArgs, "--output", join(output, debugExport)]);
       await cli(["session", "stop", session]);
+      if (!baseline) {
+        const priorTargets = new Set(
+          (await send("Target.getTargets")).targetInfos.map((target) => target.targetId),
+        );
+        const teardownSession = (await cli(["session", "start"])).session_id;
+        const teardownScope = ["--session", teardownSession];
+        await cli(["navigate", url, ...teardownScope]);
+        const teardownPage = (await send("Target.getTargets")).targetInfos.find(
+          (target) =>
+            target.type === "page" && target.url === url && !priorTargets.has(target.targetId),
+        );
+        assert(teardownPage, "Fresh session's owned page not found");
+        const context = await cli(["cooperate", "sync", ...teardownScope]);
+        await cli([
+          "evaluate",
+          "setTimeout(() => { confirm('Stop first'); prompt('Stop chained'); }, 300); 'scheduled'",
+          ...teardownScope,
+          "--context",
+          context.context_id,
+        ]);
+        await eventually(async () => {
+          const status = await cli(["dialog", "status", ...teardownScope]);
+          assert.equal(status.dialogs.length, 1);
+        });
+        const stopped = await cli(["session", "stop", teardownSession]);
+        assert.deepEqual(stopped.stopped, [teardownSession]);
+        await cli(["dialog", "status", ...teardownScope], 1);
+        const tabs = await send("Target.getTargets");
+        assert(!tabs.targetInfos.some((target) => target.targetId === teardownPage.targetId));
+        console.log(
+          "PASS session stop clears asynchronous/chained dialogs and removes its owned page",
+        );
+      }
       await writeFile(
         join(output, "proof.json"),
         JSON.stringify(
