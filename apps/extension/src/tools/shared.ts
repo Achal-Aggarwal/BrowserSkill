@@ -103,7 +103,7 @@ export interface CdpRunner {
     id: string,
     accept: boolean,
     text?: string,
-    signal?: AbortSignal,
+    guard?: Pick<CdpDispatchGuard, "signal" | "onDispatch">,
   ): Promise<JavaScriptDialogInfo>;
   onDialogChanged?(
     handler: (

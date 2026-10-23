@@ -283,6 +283,13 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             ),
             ..base
         },
+        (_, "control_authority_required") => RenderInfo {
+            summary: "the agent does not currently have control",
+            hint: Some(
+                "wait for the user to return control, then inspect the current operation or dialog before deciding again; status and cancellation remain available; do not replay the original action",
+            ),
+            ..base
+        },
         (_, "input_cleanup_failed") => RenderInfo {
             summary: "input completed but temporary browser state could not be restored",
             hint: Some(
@@ -798,6 +805,17 @@ mod tests {
         );
         // Still the browser/CDP failure bucket.
         assert_eq!(info.exit_code, 3);
+    }
+
+    #[test]
+    fn control_authority_denial_does_not_request_a_blocked_renderer_sync() {
+        let data = serde_json::json!({ "reason": "control_authority_required" });
+        let info = info_for_error(ErrorCode::PermissionDenied, Some(&data));
+        assert_eq!(info.exit_code, 1);
+        let hint = info.hint.unwrap();
+        assert!(hint.contains("return control"));
+        assert!(hint.contains("do not replay"));
+        assert!(!hint.contains("cooperate sync"));
     }
 
     #[test]

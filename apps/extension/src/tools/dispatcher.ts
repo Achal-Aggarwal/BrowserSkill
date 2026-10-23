@@ -553,7 +553,7 @@ export class ToolDispatcher {
   ): Promise<unknown> {
     const run = (cdp = this.cdp, operationSignal = signal, completionSignal = operationSignal) =>
       this.invokeTool(req, operationSignal, onInputSent, cdp, completionSignal);
-    // Modal decisions must stay reachable while cooperation pauses page actions.
+    // Modal control uses cached authority checks, without blocked renderer preparation.
     if (req.method.startsWith("tool.dialog_")) return run();
     if (req.method === "tool.cooperate" && this.cooperation && this.cdp) {
       const cdp = this.cdp;
@@ -591,7 +591,7 @@ export class ToolDispatcher {
         req.method,
         req.params as import("@/transport/types").DialogHandleParams,
         this.cdp,
-        signal,
+        { signal, authority: this.cooperation },
       );
     }
     const preparationError = await prepareBackgroundExecution(

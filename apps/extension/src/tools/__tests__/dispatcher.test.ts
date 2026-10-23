@@ -47,7 +47,10 @@ function makeRequest(method: string, params: unknown): RequestFrame {
 }
 
 describe("ToolDispatcher", () => {
-  it("resolves a modal without renderer preparation or the active debug screenshot hook", async () => {
+  it.each([
+    false,
+    true,
+  ])("handles modal control without renderer preparation, held=%s", async (held) => {
     const { transport, sent, deliver } = fakeTransport();
     const sessions = new SessionManager({
       agentWindow: {
@@ -80,7 +83,23 @@ describe("ToolDispatcher", () => {
       after: vi.fn(),
       dispose: vi.fn(),
     };
-    const dispatcher = new ToolDispatcher({ transport, sessions, cdp, debug: debug as never });
+    const cooperation = new CooperationController({
+      sessions,
+      changed: () => {},
+      readFrames: async () => {
+        throw new Error("Renderer blocked");
+      },
+      resumeFrames: async () => {},
+    });
+    cooperation.startSession("owner");
+    if (held) await cooperation.control(7, cooperation.view(7)!.revision, "hold");
+    const dispatcher = new ToolDispatcher({
+      transport,
+      sessions,
+      cdp,
+      cooperation,
+      debug: debug as never,
+    });
     dispatcher.start();
     deliver(
       makeRequest("tool.dialog_accept", {
@@ -89,20 +108,32 @@ describe("ToolDispatcher", () => {
         text: "Agent input",
       }),
     );
-    await vi.waitFor(() => expect(sent.some((frame) => "result" in frame)).toBe(true));
-    expect(sent).toContainEqual(
-      expect.objectContaining({
-        result: expect.objectContaining({
-          dialog: expect.objectContaining({ handled: "accepted" }),
+    await vi.waitFor(() =>
+      expect(sent.some((frame) => "id" in frame && frame.id === "r-1")).toBe(true),
+    );
+    if (held) {
+      expect(sent).toContainEqual(
+        expect.objectContaining({
+          error: expect.objectContaining({
+            code: "permission_denied",
+            data: expect.objectContaining({ reason: "control_authority_required" }),
+          }),
         }),
-      }),
-    );
-    expect(cdp.resolveDialog).toHaveBeenCalledWith(
-      "dlg",
-      true,
-      "Agent input",
-      expect.any(AbortSignal),
-    );
+      );
+      expect(cdp.resolveDialog).not.toHaveBeenCalled();
+    } else {
+      expect(sent).toContainEqual(
+        expect.objectContaining({
+          result: expect.objectContaining({
+            dialog: expect.objectContaining({ handled: "accepted" }),
+          }),
+        }),
+      );
+      expect(cdp.resolveDialog).toHaveBeenCalledWith("dlg", true, "Agent input", {
+        signal: expect.any(AbortSignal),
+        onDispatch: expect.any(Function),
+      });
+    }
     expect(cdp.send).not.toHaveBeenCalled();
     expect(debug.before).not.toHaveBeenCalled();
     dispatcher.stop();

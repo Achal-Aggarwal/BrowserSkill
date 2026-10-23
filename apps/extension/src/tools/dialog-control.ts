@@ -1,3 +1,4 @@
+import { type ControlAuthority, ControlAuthorityError } from "@/cooperation/control-authority";
 import { isAgentControlledTab, type SessionManager } from "@/session-manager/manager";
 import type { DialogHandleParams, DialogStatusParams, RpcError } from "@/transport/types";
 import {
@@ -14,7 +15,7 @@ export async function handleDialog(
   method: string,
   params: DialogStatusParams | DialogHandleParams,
   cdp: CdpRunner,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; authority?: ControlAuthority } = {},
 ): Promise<unknown | RpcError> {
   const ctx = lookupSession(manager, params, "dialog");
   if (isRpcError(ctx)) return ctx;
@@ -45,6 +46,11 @@ export async function handleDialog(
       message: "text is only valid for prompt acceptance and must be at most 4096 characters",
     };
   try {
+    // Status and rejection remain available for cleanup. Affirmative decisions
+    // require control, but cannot refresh a renderer blocked by this modal.
+    const check = accept
+      ? options.authority?.controlGuard(ctx.sessionId, dialog.tab_id)
+      : undefined;
     const tab = await chromeTabsApi.get(dialog.tab_id);
     const denied = enforceAgentWindow(
       ctx,
@@ -52,9 +58,13 @@ export async function handleDialog(
       "dialog",
     );
     if (denied) return denied;
-    const handled = await cdp.resolveDialog(dialog.id, accept, p.text, signal);
+    const handled = await cdp.resolveDialog(dialog.id, accept, p.text, {
+      signal: options.signal,
+      onDispatch: check,
+    });
     return { session_id: ctx.sessionId, dialog: handled };
   } catch (error) {
+    if (error instanceof ControlAuthorityError) return error.rpcError;
     return { code: "cdp_failed", message: error instanceof Error ? error.message : String(error) };
   }
 }

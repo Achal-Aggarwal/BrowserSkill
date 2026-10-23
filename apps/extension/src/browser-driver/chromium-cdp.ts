@@ -997,14 +997,14 @@ export class ChromiumCdp {
     id: string,
     accept: boolean,
     text?: string,
-    signal?: AbortSignal,
+    guard: Pick<CdpDispatchGuard, "signal" | "onDispatch"> = {},
   ): Promise<JavaScriptDialogInfo> {
     const entry = [...this.pendingDialogEntries.values()].find((item) => item.dialog.id === id);
     if (!entry) throw new Error("Dialog is no longer pending");
     if (entry.resolving) throw new Error("Dialog decision is already in progress");
     if (text !== undefined && (!accept || entry.dialog.type !== "prompt"))
       throw new Error("text is only valid when accepting a prompt");
-    signal?.throwIfAborted();
+    guard.signal?.throwIfAborted();
     if (
       this.options.canControlDialog &&
       !(await this.options.canControlDialog(entry.dialog.tab_id))
@@ -1037,11 +1037,12 @@ export class ChromiumCdp {
             : {}),
         },
         {
-          signal,
+          signal: guard.signal,
           attachmentId: entry.attachmentId,
           onDispatch: () => {
             if (this.pendingDialogEntries.get(entry.dialog.tab_id) !== entry)
               throw new Error("Dialog changed before native dispatch");
+            guard.onDispatch?.();
           },
         },
       );

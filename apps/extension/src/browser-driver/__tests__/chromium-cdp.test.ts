@@ -742,6 +742,40 @@ describe("ChromiumCdp", () => {
     });
   });
 
+  it("rechecks decision authority after asynchronous eligibility and keeps a refused dialog pending", async () => {
+    const { api, onEvent } = fakeApi();
+    let allowed = true;
+    const canControlDialog = vi.fn(async () => true);
+    const cdp = new ChromiumCdp(api, { canControlDialog });
+    await cdp.ensureAttached(3);
+    onEvent.fire({ tabId: 3 }, "Page.javascriptDialogOpening", {
+      type: "confirm",
+      message: "Decide",
+    });
+    await vi.waitFor(() => expect(cdp.pendingDialogs(3)).toHaveLength(1));
+    const id = cdp.pendingDialogs(3)[0].id;
+    canControlDialog.mockImplementationOnce(async () => {
+      allowed = false;
+      return true;
+    });
+    vi.mocked(api.sendCommand).mockClear();
+    await expect(
+      cdp.resolveDialog(id, true, undefined, {
+        onDispatch: () => {
+          if (!allowed) throw new Error("Control revoked");
+        },
+      }),
+    ).rejects.toThrow("Control revoked");
+    expect(api.sendCommand).not.toHaveBeenCalled();
+    expect(cdp.pendingDialogs(3)[0].id).toBe(id);
+    vi.mocked(api.sendCommand).mockImplementation(async (_target, method) => {
+      if (method === "Page.handleJavaScriptDialog")
+        onEvent.fire({ tabId: 3 }, "Page.javascriptDialogClosed", { result: false });
+    });
+    expect(await cdp.resolveDialog(id, false)).toMatchObject({ handled: "dismissed" });
+    cdp.dispose();
+  });
+
   it("clears pending dialog identities on detach and never attaches for a stale decision", async () => {
     const { api, onEvent } = fakeApi();
     const cdp = new ChromiumCdp(api);

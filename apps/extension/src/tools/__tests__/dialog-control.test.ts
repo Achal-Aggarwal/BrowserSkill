@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CooperationController } from "@/cooperation/controller";
 import { SessionManager } from "@/session-manager/manager";
 import type { PendingJavaScriptDialog } from "@/transport/types";
 import { handleDialog } from "../dialog-control";
@@ -30,14 +31,28 @@ async function fixture() {
   await sessions.start("other");
   const tabs = { get: vi.fn(async () => ({ id: 7, windowId: 42 })) };
   vi.stubGlobal("chrome", { tabs });
+  const authority = new CooperationController({
+    sessions,
+    changed: () => {},
+    readFrames: async () => {
+      throw new Error("Renderer is blocked");
+    },
+    resumeFrames: async () => {},
+  });
+  authority.startSession("owner");
+  const nativeDecision = vi.fn();
   const cdp = {
     send: vi.fn(() => {
       throw new Error("Renderer is blocked");
     }),
     pendingDialogs: vi.fn(() => [pending]),
-    resolveDialog: vi.fn(async () => ({ ...pending, handled: "accepted" })),
+    resolveDialog: vi.fn(async (_id, accept, text, guard) => {
+      guard?.onDispatch?.();
+      nativeDecision(accept, text);
+      return { ...pending, handled: accept ? "accepted" : "dismissed" };
+    }),
   } as unknown as CdpRunner;
-  return { sessions, cdp, tabs };
+  return { sessions, cdp, tabs, authority, nativeDecision };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -68,7 +83,10 @@ describe("native dialog control", () => {
         cdp,
       ),
     ).toMatchObject({ dialog: { handled: "accepted" } });
-    expect(cdp.resolveDialog).toHaveBeenCalledWith(pending.id, true, text, undefined);
+    expect(cdp.resolveDialog).toHaveBeenCalledWith(pending.id, true, text, {
+      signal: undefined,
+      onDispatch: undefined,
+    });
     expect(cdp.send).not.toHaveBeenCalled();
   });
 
@@ -92,6 +110,60 @@ describe("native dialog control", () => {
       ),
     ).toMatchObject({ code: "permission_denied" });
     expect(cdp.resolveDialog).not.toHaveBeenCalled();
+  });
+
+  it("blocks acceptance on hold but leaves status and dismissal available", async () => {
+    const { sessions, cdp, authority, nativeDecision } = await fixture();
+    await authority.control(7, authority.view(7)!.revision, "hold");
+    const options = { authority };
+    const params = { session_id: "owner", dialog_id: pending.id };
+    expect(await handleDialog(sessions, "tool.dialog_accept", params, cdp, options)).toMatchObject({
+      code: "permission_denied",
+      data: { reason: "control_authority_required", effect_state: "none" },
+    });
+    expect(nativeDecision).not.toHaveBeenCalled();
+    expect(await handleDialog(sessions, "tool.dialog_status", params, cdp, options)).toMatchObject({
+      dialogs: [pending],
+    });
+    expect(await handleDialog(sessions, "tool.dialog_dismiss", params, cdp, options)).toMatchObject(
+      { dialog: { handled: "dismissed" } },
+    );
+    expect(nativeDecision).toHaveBeenCalledWith(false, undefined);
+    expect(cdp.send).not.toHaveBeenCalled();
+  });
+
+  it("fences a hold arriving during asynchronous browser metadata lookup", async () => {
+    const { sessions, cdp, authority, tabs, nativeDecision } = await fixture();
+    tabs.get.mockImplementationOnce(async () => {
+      await authority.control(7, authority.view(7)!.revision, "hold");
+      return { id: 7, windowId: 42 };
+    });
+    expect(
+      await handleDialog(
+        sessions,
+        "tool.dialog_accept",
+        { session_id: "owner", dialog_id: pending.id },
+        cdp,
+        { authority },
+      ),
+    ).toMatchObject({
+      code: "permission_denied",
+      data: { reason: "control_authority_required", effect_state: "none" },
+    });
+    expect(nativeDecision).not.toHaveBeenCalled();
+  });
+
+  it("allows a decision without reading the renderer while retaining stopped errors", async () => {
+    const { sessions, cdp, authority } = await fixture();
+    const params = { session_id: "owner", dialog_id: pending.id, text: "chosen" };
+    expect(
+      await handleDialog(sessions, "tool.dialog_accept", params, cdp, { authority }),
+    ).toMatchObject({ dialog: { handled: "accepted" } });
+    authority.stopSession("owner");
+    expect(
+      await handleDialog(sessions, "tool.dialog_accept", params, cdp, { authority }),
+    ).toMatchObject({ code: "user_aborted" });
+    expect(cdp.send).not.toHaveBeenCalled();
   });
 
   it("rejects text on a dismiss command and text beyond the bounded input", async () => {

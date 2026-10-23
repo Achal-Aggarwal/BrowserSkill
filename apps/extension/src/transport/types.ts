@@ -25,6 +25,7 @@ export type ErrorCode =
 /** Stable `RpcError.data.reason` values for CLI hint selection. */
 export type RpcErrorReason =
   | "cooperation_sync_required"
+  | "control_authority_required"
   | "extract_params_invalid"
   | "extract_target_stale"
   | "extract_target_ambiguous"
