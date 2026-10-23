@@ -105,19 +105,40 @@ function forgetPendingAccessibility(
     if (!error.sessionId || target.sessionId === error.sessionId) enabled.delete(target);
 }
 
-export async function captureObservationFacts<T extends FrameOwnedAxNode>(
+export function captureObservationFacts<T extends FrameOwnedAxNode>(
   cdp: CdpRunner,
   tabId: number,
   signal?: AbortSignal,
   pageUrl?: string,
   options: { includeVisualFacts?: boolean } = {},
 ): Promise<ObservationFacts<T>> {
-  // Cleanup must run after identity and geometry reads as well as AX. A
-  // cleanup timeout closes the target's read gate until Chrome replies.
+  return withObservationFacts(
+    cdp,
+    tabId,
+    (facts: ObservationFacts<T>) => facts,
+    signal,
+    pageUrl,
+    options,
+  );
+}
+
+/** Keep Accessibility enabled through the consumer's remaining reads, including
+ * hover probes. Cleanup can close the read gate until Chrome replies, so it
+ * must follow the entire observation, even when the consumer fails or aborts. */
+export async function withObservationFacts<T extends FrameOwnedAxNode, R>(
+  cdp: CdpRunner,
+  tabId: number,
+  consume: (facts: ObservationFacts<T>) => R | Promise<R>,
+  signal?: AbortSignal,
+  pageUrl?: string,
+  options: { includeVisualFacts?: boolean } = {},
+): Promise<R> {
   const axEnabled = new Map<CdpTarget, string | undefined>();
-  let facts: ObservationFacts<T>;
+  let result: R;
   try {
-    facts = await collectObservationFacts<T>(cdp, tabId, axEnabled, signal, pageUrl, options);
+    const facts = await collectObservationFacts<T>(cdp, tabId, axEnabled, signal, pageUrl, options);
+    throwCaptureAborted(signal);
+    result = await consume(facts);
   } catch (error) {
     forgetPendingAccessibility(axEnabled, error);
     throw error;
@@ -125,7 +146,7 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
     await releaseAccessibility(cdp, tabId, axEnabled);
   }
   throwCaptureAborted(signal);
-  return facts;
+  return result;
 }
 
 async function collectObservationFacts<T extends FrameOwnedAxNode>(
