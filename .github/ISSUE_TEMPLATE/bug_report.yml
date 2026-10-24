@@ -18,8 +18,6 @@ body:
           required: true
         - label: I have verified that all sensitive data (passwords, tokens, API keys, private URLs, personal info) have been redacted from logs and snippets.
           required: true
-        - label: This is a bug report and not a security vulnerability (see our [Security Advisories](https://github.com/Tencent/BrowserSkill/security/advisories/new)).
-          required: true
   - type: input
     id: version
     attributes:
