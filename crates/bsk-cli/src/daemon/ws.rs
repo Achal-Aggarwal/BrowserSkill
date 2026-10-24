@@ -669,6 +669,7 @@ fn handle_session_window_closed(
         &state.tool_queues,
         &state.session_interrupts,
         &session_id,
+        Some(crate::rpc_reason::SESSION_WINDOW_CLOSED),
     ) {
         state.transfers.release_session(&session_id.0);
         state.dialog_operations.remove_session(&session_id.0);
