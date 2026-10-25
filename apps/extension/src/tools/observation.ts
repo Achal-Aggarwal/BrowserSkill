@@ -1142,15 +1142,21 @@ export function nextObserveIdentityStreak(
  * Turn a repeated observation identity failure into the distinct
  * anti-debugging error; returns null while the failure still looks
  * transient so the normal `cdp_failed` path applies.
+ *
+ * The streak is page-scoped, so an observation whose target could not
+ * be resolved to a URL never counts toward one — that failure keeps
+ * the plain identity-changed error (maintainer review of issue #465,
+ * P1: `ResolvedTargetTab.url` is optional). Exported for tests.
  */
-function observeIdentityReloadLoopError(
+export function observeIdentityReloadLoopError(
   ctx: SessionContext,
   tabId: number,
-  tabUrl: string,
+  tabUrl: string | undefined,
   err: unknown,
 ): RpcError | null {
   const message = err instanceof Error ? err.message : String(err);
   if (!message.includes(OBSERVE_IDENTITY_CHANGED)) return null;
+  if (!tabUrl) return null;
   const key = observeIdentityKey(ctx.sessionId, tabId);
   const next = nextObserveIdentityStreak(observeIdentityStreaks.get(key), tabUrl, Date.now());
   observeIdentityStreaks.set(key, next.streak);

@@ -7,7 +7,11 @@
 // third site.
 
 import { describe, expect, it } from "vitest";
-import { nextObserveIdentityStreak, OBSERVE_IDENTITY_LOOP_FAILURES } from "../observation";
+import {
+  nextObserveIdentityStreak,
+  OBSERVE_IDENTITY_LOOP_FAILURES,
+  observeIdentityReloadLoopError,
+} from "../observation";
 import { OBSERVE_IDENTITY_CHANGED } from "../vom/capture-coordinator";
 
 const SITE_A = "https://site-a.example/search";
@@ -91,5 +95,47 @@ describe("observe identity reload-loop streak", () => {
 
   it("keeps the stable anti-debugging marker importable for detection", () => {
     expect(OBSERVE_IDENTITY_CHANGED).toContain("observation document identity changed");
+  });
+});
+
+// Handler-level plumbing (maintainer review, P1): `ResolvedTargetTab.url`
+// is optional, and a failure on a tab whose URL is unavailable must not
+// count toward a page-specific streak — the original error is preserved.
+describe("observe identity reload-loop error plumbing", () => {
+  const ctxOf = (sessionId: string) =>
+    ({ sessionId }) as unknown as Parameters<typeof observeIdentityReloadLoopError>[0];
+  const identityFailure = () => new Error(OBSERVE_IDENTITY_CHANGED);
+
+  it("never counts failures with an unavailable URL toward a streak", () => {
+    const ctx = ctxOf("sess-nourl");
+    // If these were counted anywhere shared, the third failure would flip
+    // to the anti-debugging error; each must instead round-trip to the
+    // plain identity-changed cdp_failed path.
+    for (const url of [undefined, "", undefined]) {
+      expect(observeIdentityReloadLoopError(ctx, 7, url, identityFailure())).toBeNull();
+    }
+  });
+
+  it("still names the loop once a URL is known, with the page-scoped reason", () => {
+    const ctx = ctxOf("sess-withurl");
+    expect(observeIdentityReloadLoopError(ctx, 11, SITE_A, identityFailure())).toBeNull();
+    expect(observeIdentityReloadLoopError(ctx, 11, SITE_A, identityFailure())).toBeNull();
+    const third = observeIdentityReloadLoopError(ctx, 11, SITE_A, identityFailure());
+    expect(third).not.toBeNull();
+    expect(third?.code).toBe("cdp_failed");
+    expect(third?.data?.reason).toBe("observe_identity_reload_loop");
+    expect(third?.message).toContain(OBSERVE_IDENTITY_CHANGED);
+  });
+
+  it("an unavailable URL does not seed a later same-tab streak", () => {
+    const ctx = ctxOf("sess-seed");
+    expect(observeIdentityReloadLoopError(ctx, 5, undefined, identityFailure())).toBeNull();
+    // The tab resolves to a URL afterwards: only its own failures count.
+    expect(observeIdentityReloadLoopError(ctx, 5, SITE_B, identityFailure())).toBeNull();
+  });
+
+  it("keeps unrelated errors untouched", () => {
+    const ctx = ctxOf("sess-other");
+    expect(observeIdentityReloadLoopError(ctx, 3, SITE_C, new Error("boom"))).toBeNull();
   });
 });
