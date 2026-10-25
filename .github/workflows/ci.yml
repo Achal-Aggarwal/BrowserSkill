@@ -69,6 +69,12 @@ jobs:
       - name: Run Windows audit and browser interaction policy tests
         run: cargo test -p bsk --test audit_ws --test interaction_preferences --locked
 
+      - name: Run Windows remote authorization storage tests
+        run: cargo test -p bsk --lib --locked daemon::remote::authorization::tests
+
+      - name: Run Windows remote server integration tests
+        run: cargo test -p bsk --test remote_server --locked
+
       - name: Verify background startup refusal inside the runner Job
         run: cargo test -p bsk --test windows_daemon_start --locked restrictive_job_refuses_explicit_and_automatic_start_without_a_daemon -- --exact
 
