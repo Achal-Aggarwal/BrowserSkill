@@ -832,15 +832,11 @@ pub(crate) fn spawn_browser_liveness_reaper(
                         idle_secs = client.idle_for().as_secs(),
                         "reaping unresponsive browser (no heartbeat within liveness window)"
                     );
-                    for s in state.sessions.purge_browser(&client.id) {
-                        state.tool_queues.remove(&s.id);
-                        state.session_interrupts.drop_session(&s.id);
-                        state.transfers.release_session(&s.id.0);
-                        state
-                            .sessions
-                            .remember_end(&s.id, crate::rpc_reason::BROWSER_DISCONNECTED);
-                        debug!(session = %s.id, "purged session on browser liveness timeout");
-                    }
+                    state.purge_sessions_of_browser(
+                        &client.id,
+                        crate::rpc_reason::BROWSER_DISCONNECTED,
+                        "purged session on browser liveness timeout",
+                    );
                 }
             }
         }

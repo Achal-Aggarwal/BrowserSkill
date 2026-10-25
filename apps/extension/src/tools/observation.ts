@@ -1092,6 +1092,7 @@ async function buildVomObservation(
 // ---------------------------------------------------------------------------
 
 interface ObserveIdentityStreak {
+  url: string;
   count: number;
   firstAt: number;
   lastAt: number;
@@ -1112,20 +1113,29 @@ function observeIdentityKey(sessionId: string, tabId: number): string {
 
 /**
  * Pure rule so the streak logic is testable without a browser: a failure
- * joins the previous streak when it happens within `windowMs` of the
- * streak's first failure; otherwise the counter restarts.
+ * joins the previous streak only when it is on the **same page** (identical
+ * URL) and happens within `windowMs` of the streak's first failure; a
+ * navigation to another site or an expired window restarts the counter
+ * (maintainer review of issue #465: one transient failure each on three
+ * different sites must not falsely diagnose the third site).
  */
 export function nextObserveIdentityStreak(
   previous: ObserveIdentityStreak | undefined,
+  url: string,
   failureAt: number,
   windowMs: number = OBSERVE_IDENTITY_LOOP_WINDOW_MS,
 ): { streak: ObserveIdentityStreak; isReloadLoop: boolean } {
-  const continues = previous !== undefined && failureAt - previous.firstAt <= windowMs;
-  const count = continues ? previous!.count + 1 : 1;
+  const continues =
+    previous !== undefined && previous.url === url && failureAt - previous.firstAt <= windowMs;
   const streak: ObserveIdentityStreak = continues
-    ? { count, firstAt: previous!.firstAt, lastAt: failureAt }
-    : { count: 1, firstAt: failureAt, lastAt: failureAt };
-  return { streak, isReloadLoop: count >= OBSERVE_IDENTITY_LOOP_FAILURES };
+    ? {
+        url,
+        count: previous!.count + 1,
+        firstAt: previous!.firstAt,
+        lastAt: failureAt,
+      }
+    : { url, count: 1, firstAt: failureAt, lastAt: failureAt };
+  return { streak, isReloadLoop: streak.count >= OBSERVE_IDENTITY_LOOP_FAILURES };
 }
 
 /**
@@ -1136,12 +1146,13 @@ export function nextObserveIdentityStreak(
 function observeIdentityReloadLoopError(
   ctx: SessionContext,
   tabId: number,
+  tabUrl: string,
   err: unknown,
 ): RpcError | null {
   const message = err instanceof Error ? err.message : String(err);
   if (!message.includes(OBSERVE_IDENTITY_CHANGED)) return null;
   const key = observeIdentityKey(ctx.sessionId, tabId);
-  const next = nextObserveIdentityStreak(observeIdentityStreaks.get(key), Date.now());
+  const next = nextObserveIdentityStreak(observeIdentityStreaks.get(key), tabUrl, Date.now());
   observeIdentityStreaks.set(key, next.streak);
   if (!next.isReloadLoop) return null;
   return rpcError(
@@ -1314,7 +1325,7 @@ async function handleVomObservation(
     // Fresh observations clear their predecessor before capture. Continuation owns
     // invalidation; cancellation must preserve its unpublished page for retry.
     if (isAbortError(err)) return cancelled(toolName);
-    const identityLoopError = observeIdentityReloadLoopError(ctx, target.tabId, err);
+    const identityLoopError = observeIdentityReloadLoopError(ctx, target.tabId, target.url, err);
     if (identityLoopError) return identityLoopError;
     return {
       code: "cdp_failed",
