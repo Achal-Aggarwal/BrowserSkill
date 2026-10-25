@@ -11,15 +11,17 @@ import {
   isCommandNotFound,
   isNavigationLifecycleTimeoutPayload,
   isSessionBusyResult,
+  KILL_GRACE_MS,
   parseBskJson,
   runWithSessionBusyRetry,
+  SETTLE_AFTER_KILL_SLACK_MS,
+  WINDOWS_KILL_GRACE_MS,
 } from "../src/runner";
 
-// Mirrors KILL_GRACE_MS / WINDOWS_KILL_GRACE_MS in src/runner.ts: the forced
-// kill lands after a platform-specific grace, and the caller is released one
-// second after that. Fake timers have to advance past both.
-const KILL_GRACE_MS = process.platform === "win32" ? 15_000 : 3_000;
-const SETTLE_AFTER_KILL_MS = KILL_GRACE_MS + 1_000;
+// Wait for both the platform-specific forced kill and the settlement fallback.
+const SETTLE_AFTER_KILL_MS =
+  (process.platform === "win32" ? WINDOWS_KILL_GRACE_MS : KILL_GRACE_MS) +
+  SETTLE_AFTER_KILL_SLACK_MS;
 
 /** Minimal fake stdio pipe recording whether the runner closed its end. */
 class FakeStream extends EventEmitter {
