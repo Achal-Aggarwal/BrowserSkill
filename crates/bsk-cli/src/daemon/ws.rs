@@ -954,14 +954,11 @@ mod session_user_interrupt_tests {
 mod ws_connection_limit_tests {
     use super::*;
     use crate::daemon::start::DaemonConfig;
-    use futures_util::SinkExt as _;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::http::header::{HeaderName, HeaderValue};
 
     fn extension_origin_request(url: &str) -> impl IntoClientRequest {
-        let mut request = url
-            .into_client_request()
-            .expect("valid ws url");
+        let mut request = url.into_client_request().expect("valid ws url");
         request.headers_mut().insert(
             HeaderName::from_static("origin"),
             // MV3 extension ids are 32 a-p characters (see origin_allowed).
@@ -982,7 +979,6 @@ mod ws_connection_limit_tests {
     #[tokio::test]
     async fn ws_upgrade_times_out_for_silent_clients() {
         let (handle, _state) = bind_test_server().await;
-        let url = format!("ws://{}/", handle.local_addr);
 
         // A client that connects but never starts the HTTP Upgrade pins a
         // task + socket only until WS_UPGRADE_TIMEOUT, then the daemon
@@ -990,22 +986,19 @@ mod ws_connection_limit_tests {
         let mut silent = tokio::net::TcpStream::connect(handle.local_addr)
             .await
             .expect("tcp connected");
-        let dropped = tokio::time::timeout(
-            WS_UPGRADE_TIMEOUT + Duration::from_secs(5),
-            {
-                let read_half = &mut silent;
-                async move {
-                    let mut buf = [0u8; 64];
-                    loop {
-                        match tokio::io::AsyncReadExt::read(read_half, &mut buf).await {
-                            Ok(0) => break true,
-                            Ok(_) => continue,
-                            Err(_) => break true,
-                        }
+        let dropped = tokio::time::timeout(WS_UPGRADE_TIMEOUT + Duration::from_secs(5), {
+            let read_half = &mut silent;
+            async move {
+                let mut buf = [0u8; 64];
+                loop {
+                    match tokio::io::AsyncReadExt::read(read_half, &mut buf).await {
+                        Ok(0) => break true,
+                        Ok(_) => continue,
+                        Err(_) => break true,
                     }
                 }
-            },
-        )
+            }
+        })
         .await
         .expect("connection dropped within upgrade timeout + slack");
         assert!(dropped, "silent TCP client must eventually be dropped");
@@ -1049,7 +1042,10 @@ mod ws_connection_limit_tests {
         })
         .await
         .expect("over-cap connection closed promptly");
-        assert!(rejected_closed, "connection beyond the cap must be rejected");
+        assert!(
+            rejected_closed,
+            "connection beyond the cap must be rejected"
+        );
 
         // Release every slot; a fresh client must get in again.
         for mut ws in held {
