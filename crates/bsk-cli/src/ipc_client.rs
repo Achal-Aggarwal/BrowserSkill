@@ -180,11 +180,11 @@ mod platform {
                         }
                         Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
                             return Err(anyhow::Error::from(err).context(format!(
-                                "connect IPC named pipe {name}: access denied. The pipe admits \
-                                 only the account that started the daemon, so a client running \
-                                 as another account (for example a sandbox user) cannot open \
-                                 it. See docs/sandboxed-agents.md, section \
-                                 \"Windows sandbox users\""
+                                "connect IPC named pipe {name}: access denied. The current account \
+                                 or access token lacks permission to open the daemon's pipe. This \
+                                 can happen when a sandbox uses a different account or a restricted \
+                                 token. See https://github.com/Tencent/BrowserSkill/blob/main/docs/\
+                                 sandboxed-agents.md#windows-sandbox-users-access-denied-on-the-pipe"
                             )));
                         }
                         Err(err) => {
