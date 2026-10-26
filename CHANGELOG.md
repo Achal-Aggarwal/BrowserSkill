@@ -23,11 +23,11 @@ Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
   ([#484](https://github.com/Tencent/BrowserSkill/issues/484)).
 - Extension: shared-control actions no longer refuse forever on pages with
   self-updating text such as clocks or counters. The first change is reported
-  with its before/after text and requires a sync; after that, text-only
-  changes to those nodes stop blocking actions on a ref or selector unless
-  they sit inside the target or its form, list, dialog or similar region.
-  Actions without a target, form values, modal layers and `--depends-on`
-  regions stay exact, and a refused context can no longer be retried
+  with its before/after text and requires a sync; after that, changes to that
+  text stop blocking actions on a ref or selector unless it shares a form,
+  list, dialog, panel or other container with the target. Actions without a
+  target, form values, modal layers and `--depends-on` regions stay exact,
+  and a refused context can no longer be retried
   ([#495](https://github.com/Tencent/BrowserSkill/issues/495)).
 
 ## [0.3.3] - 2026-10-14

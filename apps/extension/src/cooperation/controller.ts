@@ -14,6 +14,7 @@ import {
   contentChanges,
   type ObservationEvidence,
   observationEvidence,
+  observesTarget,
   sameObservationEvidence,
 } from "./observation-evidence";
 import { pointerTargetValidator } from "./pointer-target";
@@ -685,7 +686,7 @@ export class CooperationController implements ControlAuthority {
             }),
           state: { ...this.view(state.tabId), mode: "ready" },
           guidance:
-            "Continue toward the assigned goal using this current state. Incorporate helpful progress and correct recoverable mistakes. Page activity is not a change of goal. Each context authorizes one action; sync after it. By default the whole page is checked. Text that changes by itself (clocks, counters) is reported once; after the next sync it no longer blocks actions on a ref or selector, unless it is inside the target or shares its form, list, dialog or similar region. Actions without a ref or selector always check the whole page exactly. To tolerate other unrelated updates, declare all observed decision regions with --depends-on refs/selectors (plugin: dependsOn); the target region and form values remain protected. Verify completion and prior submissions from application evidence.",
+            "Continue toward the assigned goal using this current state. Incorporate helpful progress and correct recoverable mistakes. Page activity is not a change of goal. Each context authorizes one action; sync after it. By default the whole page is checked. Text that changes by itself (clocks, counters) is reported once; after the next sync it no longer blocks actions on a ref or selector unless it shares a form, list, dialog, panel or other container with the target. Actions without a ref or selector always check the whole page exactly. To tolerate other unrelated updates, declare all observed decision regions with --depends-on refs/selectors (plugin: dependsOn); the target region and form values remain protected. Verify completion and prior submissions from application evidence.",
         };
       } finally {
         state.working = false;
@@ -1048,10 +1049,16 @@ export class CooperationController implements ControlAuthority {
           (revoked = "The action's observed content changed; synchronize and replan"),
         );
       }
-      // Learned text is tolerated only for actions with a resolved target. A
-      // target-less key press or script acts on whatever is focused, so its
-      // region cannot be protected and the whole page stays exact.
-      const tolerant = actionTarget !== undefined;
+      // Learned text is tolerated only around a resolved target present in both
+      // observations, whose region can be protected. A target-less key press or
+      // script acts on whatever is focused, and a selector may resolve outside
+      // the observation (for example inside aria-hidden content); both keep the
+      // exact whole-page check.
+      const anchored =
+        actionTarget !== undefined &&
+        observesTarget(context.evidence, actionTarget) &&
+        observesTarget(evidence, actionTarget);
+      const tolerant = anchored;
       const pages = documents(state.frames);
       const volatile =
         tolerant && state.volatile?.documents === pages ? state.volatile.keys : undefined;
@@ -1068,7 +1075,7 @@ export class CooperationController implements ControlAuthority {
           );
         }
         return (
-          (!actionTarget ||
+          (!anchored ||
             sameObservationEvidence(context.evidence!, evidence!, actionTarget, keys)) &&
           sameObservationEvidence(context.evidence!, evidence!, undefined, keys)
         );
@@ -1098,9 +1105,15 @@ export class CooperationController implements ControlAuthority {
           documents: pages,
           keys: new Set([...(pending ?? []), ...changes.map((change) => change.key)]),
         };
-        const [first] = changes;
+        // One clock is several nodes (element, text, line box); report it once.
+        const reported = [
+          ...new Map(
+            changes.map((change) => [`${change.before}\u0000${change.after}`, change]),
+          ).values(),
+        ];
+        const [first] = reported;
         throw new Error(
-          (revoked = `Page text outside the action's own region changed by itself (${quote(first.before)} → ${quote(first.after)}${changes.length > 1 ? ` and ${changes.length - 1} more` : ""}); synchronize and replan. After that sync, further text-only changes there stop blocking actions on other elements unless they share a form, list, dialog or similar region; if the decision relies on that text, declare it with --depends-on to keep it exact`),
+          (revoked = `Page text changed by itself (${quote(first.before)} → ${quote(first.after)}${reported.length > 1 ? ` and ${reported.length - 1} more` : ""}); synchronize and replan. After that sync, further changes to that text no longer block actions on a ref or selector elsewhere. They still block actions whose target shares a form, list, dialog, panel or other container with it, and actions without a ref or selector. If the decision relies on that text, declare it with --depends-on to keep it exact`),
         );
       }
       throw new Error((revoked = "The action's observed content changed; synchronize and replan"));

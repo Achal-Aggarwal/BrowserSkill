@@ -1,5 +1,5 @@
 import type { VomNode } from "@browser-skill/vom";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { contentChanges, sameObservationEvidence } from "./observation-evidence";
 
 const node = (id: number, parentId: number | null, role: string, name = ""): VomNode => ({
@@ -155,4 +155,146 @@ it("relaxes learned text only around targets in <main> or without a region", () 
     expect(check(region)).toBe(false);
   // Text inside the target itself is never relaxed.
   expect(check("main", false)).toBe(false);
+});
+
+// Real Chrome observations add text nodes and derive container names from
+// descendant text: a tick changes every ancestor's name, a StaticText node and
+// an InlineTextBox without a backend node.
+const page = (clock: string, price = "$100", hidden = false): VomNode[] => [
+  { ...node(1, null, "main"), name: hidden ? clock : `${clock} ${price}` },
+  { ...node(2, 1, "span"), name: clock, text: clock },
+  { ...node(3, 2, "StaticText"), name: clock },
+  { ...node(4, 3, "InlineTextBox"), name: clock, backendNodeId: undefined },
+  { ...node(5, 1, "generic"), name: price },
+  ...(hidden
+    ? []
+    : [
+        { ...node(6, 5, "span"), name: price, text: price },
+        { ...node(7, 6, "StaticText"), name: price },
+      ]),
+  node(8, 1, "button", "Buy"),
+];
+
+it("learns virtual text through the node that owns it, never derived names", () => {
+  const before = { nodes: page("10:00:00") };
+  const after = { nodes: page("10:00:01") };
+  expect(contentChanges(before, after)?.map((change) => change.key)).toEqual([
+    "frame:2",
+    "frame:3",
+  ]);
+  expect(sameObservationEvidence(before, after, undefined, new Set(["frame:2", "frame:3"]))).toBe(
+    true,
+  );
+  // The InlineTextBox and derived names stay exact without their owner.
+  expect(sameObservationEvidence(before, after, undefined, new Set(["frame:2"]))).toBe(false);
+});
+
+it("keeps content without its own node exact inside derived names", () => {
+  // An aria-hidden price exists only in its ancestors' derived names.
+  expect(
+    contentChanges({ nodes: page("1", "$100", true) }, { nodes: page("1", "$200", true) }),
+  ).toBe(undefined);
+  const learned = new Set(["frame:2", "frame:3"]);
+  const before = { nodes: page("10:00:00", "$100", true) };
+  // The learned clock ticks while the hidden price changes in the same container.
+  const after = { nodes: page("10:00:01", "$100", true) };
+  after.nodes[0].name = "10:00:01 $200";
+  before.nodes[0].name = "10:00:00 $100";
+  expect(sameObservationEvidence(before, after, undefined, learned)).toBe(false);
+});
+
+it("learns the same value shown twice", () => {
+  const twins = (clock: string): VomNode[] => [
+    { ...node(1, null, "main"), name: `${clock} ${clock}` },
+    { ...node(2, 1, "span"), name: clock, text: clock },
+    { ...node(3, 1, "span"), name: clock, text: clock },
+    node(4, 1, "button", "Go"),
+  ];
+  const changes = contentChanges({ nodes: twins("1") }, { nodes: twins("2") });
+  expect(changes?.map((change) => change.key)).toEqual(["frame:2", "frame:3"]);
+  // A different value elsewhere in the derived name is not learned text.
+  const after = twins("2");
+  after[0].name = "2 3";
+  expect(
+    sameObservationEvidence(
+      { nodes: twins("1") },
+      { nodes: after },
+      undefined,
+      new Set(["frame:2"]),
+    ),
+  ).toBe(false);
+});
+
+describe("learned text around a target inside <main> or without a region", () => {
+  const shape = (
+    specs: [id: number, parent: number | null, role: string, extra?: Partial<VomNode>][],
+  ): VomNode[] =>
+    // Like Chrome, an element's name includes its own text.
+    specs.map(([id, parent, role, extra]) => ({
+      ...node(id, parent, role, extra?.text),
+      ...extra,
+    }));
+  const tick = (nodes: VomNode[], id: number, text: string) => {
+    const next = structuredClone(nodes);
+    const changed = next.find((candidate) => candidate.id === id)!;
+    changed.text = text;
+    changed.name = text;
+    return next;
+  };
+  const allowed = (nodes: VomNode[], target: number, learned: number) =>
+    sameObservationEvidence(
+      { nodes },
+      { nodes: tick(nodes, learned, "changed") },
+      { backendNodeId: target, frameId: "frame" },
+      new Set([`frame:${learned}`]),
+    );
+
+  it("keeps a positioned panel exact", () => {
+    const nodes = shape([
+      [1, null, "main"],
+      [2, 1, "form"],
+      [3, 2, "button", { name: "Continue" }],
+      [4, 1, "generic", { position: "fixed" }],
+      [5, 4, "span", { text: "$100" }],
+      [6, 4, "button", { name: "Pay" }],
+    ]);
+    expect(allowed(nodes, 6, 5)).toBe(false);
+    // The same panel nested under a single-child wrapper stays exact as well.
+    const wrapped = shape([
+      [1, null, "main"],
+      [7, 1, "generic"],
+      [4, 7, "generic", { position: "absolute" }],
+      [5, 4, "span", { text: "$100" }],
+      [6, 4, "button", { name: "Pay" }],
+    ]);
+    expect(allowed(wrapped, 6, 5)).toBe(false);
+  });
+
+  it("keeps the target's own branch exact and tolerates other branches", () => {
+    const nodes = shape([
+      [1, null, "RootWebArea"],
+      [2, 1, "html"],
+      [3, 2, "body"],
+      [4, 3, "generic"],
+      [5, 4, "banner"],
+      [6, 5, "span", { text: "10:00:00" }],
+      [7, 4, "group"],
+      [8, 7, "generic"],
+      [9, 8, "span", { text: "$100" }],
+      [10, 8, "button", { name: "Buy" }],
+      [11, 7, "button", { name: "Refresh" }],
+    ]);
+    // Single-child wrappers collapse, so the header is a separate branch.
+    expect(allowed(nodes, 10, 6)).toBe(true);
+    // The card's price shares the content branch with Buy and Refresh.
+    expect(allowed(nodes, 10, 9)).toBe(false);
+    expect(allowed(nodes, 11, 9)).toBe(false);
+    // A target beside its learned text directly inside <main> is its own branch.
+    const flat = shape([
+      [1, null, "main"],
+      [2, 1, "button", { name: "Go" }],
+      [3, 1, "span", { text: "10:00:00" }],
+    ]);
+    expect(allowed(flat, 2, 3)).toBe(true);
+  });
 });

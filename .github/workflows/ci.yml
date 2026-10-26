@@ -265,6 +265,12 @@ jobs:
           BSK_CLICK_CHROME: google-chrome
         run: pnpm exec vitest run src/tools/__tests__/waits.browser.test.ts
 
+      - name: Run shared-control live text browser regression
+        working-directory: apps/extension
+        env:
+          BSK_CLICK_CHROME: google-chrome
+        run: pnpm exec vitest run src/cooperation/live-text.browser.test.ts
+
       - name: Run emulation-lifecycle browser regression
         working-directory: apps/extension
         env:

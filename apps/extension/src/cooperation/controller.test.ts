@@ -696,6 +696,21 @@ describe("shared-tab dispatch fences", () => {
         { ref: "e3", dependsOn: ["e6"] },
       ));
 
+    it("never learns text that changed alongside human input", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      const f = await fixture();
+      // The person acts on the page while the clock ticks.
+      f.change({ human: 1, structure: 50 });
+      expect(await act(f, f.first.context_id)).toMatchObject({
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+      // Nothing was learned: the next tick is reported as new page activity.
+      const synced = await f.command("sync");
+      expect((await cycle(f, synced.context_id)).message).toContain("changed by itself");
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
     it("never tolerates key presses or other actions without a resolved target", () =>
       keepsRefusing(
         page((tick) => [
