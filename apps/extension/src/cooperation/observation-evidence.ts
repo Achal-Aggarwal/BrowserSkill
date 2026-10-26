@@ -51,6 +51,16 @@ function evidenceKey(node: VomNode): string | undefined {
 // Form state and modal layers are never tolerated as page activity.
 const protectedState = (node: VomNode) =>
   node.value !== undefined || node.checked !== undefined || !!node.modal;
+// Text-bearing facts that self-updating widgets rewrite (clocks often mirror
+// their text into aria-label/title for assistive technology).
+const contentAttributes = new Set(["aria-label", "title"]);
+const content = (node: VomNode) => [
+  node.text,
+  node.name,
+  node.attrs?.["aria-label"],
+  node.attrs?.title,
+];
+const describe = (node: VomNode) => content(node).find((value) => value) ?? "";
 
 function signature(
   evidence: ObservationEvidence,
@@ -91,10 +101,28 @@ function signature(
     }
     return false;
   };
-  // Only the whole-page default check tolerates text that changed by itself;
-  // identity, structure, state and visibility of those nodes remain checked.
+  // Semantic decision units (forms, dialogs, lists, cards, popovers) stay exact.
+  // Only page layout around the target, a <main> landmark or a page without
+  // any enclosing region, may contain learned self-updating text.
+  const broad = !scope || scope.role === "main" || scope.tag === "main";
+  const withinAnchor = (node: VomNode) => {
+    const seen = new Set<number>();
+    for (
+      let current: VomNode | undefined = node;
+      current && !seen.has(current.id);
+      current = parent(current)
+    ) {
+      if (current === anchor) return true;
+      seen.add(current.id);
+    }
+    return false;
+  };
+  // Identity, structure, state and visibility of tolerated nodes remain checked.
+  // The target itself and its contents are never tolerated.
   const tolerated = (node: VomNode) =>
-    !target && !protectedState(node) && volatile?.has(evidenceKey(node) ?? "") === true;
+    volatile?.has(evidenceKey(node) ?? "") === true &&
+    !protectedState(node) &&
+    (!target || (broad && !withinAnchor(node)));
   const facts = (node: VomNode, tolerate = false) => [
     node.frameId,
     node.backendNodeId,
@@ -109,7 +137,9 @@ function signature(
     node.modal,
     !!node.rect && node.rect.w > 0 && node.rect.h > 0,
     node.pointerEvents === "none",
-    semanticAttributes.map((key) => node.attrs?.[key]),
+    semanticAttributes.map((key) =>
+      tolerate && contentAttributes.has(key) ? undefined : node.attrs?.[key],
+    ),
   ];
   return JSON.stringify([
     scope && [scope.frameId, scope.backendNodeId],
@@ -123,8 +153,12 @@ function signature(
 }
 
 /**
- * `volatile` applies only to the whole-page check (no target): text of those
- * nodes may differ. Explicit dependencies and target regions stay exact.
+ * `volatile` lists nodes whose text (name, text, aria-label, title) may differ.
+ * Without a target it applies to the whole page. With a target it applies only
+ * when the target's region is a <main> landmark or the whole page, and never to
+ * the target or its contents. Forms, dialogs, lists, tables, menus, sections,
+ * articles and positioned panels around a target stay exact, as do form values,
+ * checked states and modal layers everywhere.
  */
 export function sameObservationEvidence(
   before: ObservationEvidence,
@@ -153,12 +187,8 @@ export function contentChanges(
     const key = evidenceKey(node);
     const old = key === undefined ? undefined : previous.get(key);
     if (!key || !old || known.has(key) || protectedState(node) || protectedState(old)) continue;
-    if (old.name !== node.name || old.text !== node.text)
-      changes.push({
-        key,
-        before: old.text ?? old.name ?? "",
-        after: node.text ?? node.name ?? "",
-      });
+    if (JSON.stringify(content(old)) !== JSON.stringify(content(node)))
+      changes.push({ key, before: describe(old), after: describe(node) });
   }
   const volatile = new Set([...known, ...changes.map((change) => change.key)]);
   return changes.length && sameObservationEvidence(before, after, undefined, volatile)

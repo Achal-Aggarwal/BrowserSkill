@@ -558,7 +558,230 @@ describe("shared-tab dispatch fences", () => {
     };
     afterEach(() => {
       vi.mocked(handleSnapshot).mockReset();
+      vi.mocked(captureVomObservation).mockReset();
       vi.mocked(resolveActionTarget).mockReset();
+    });
+    type Spec = [id: number, parent: number | null, role: string, extra?: Record<string, unknown>];
+    // Builds a scene from compact node specs; `tick` drives the live text.
+    const page = (specs: (tick: number) => Spec[]) => (tick: number) => ({
+      viewport: { width: 800, height: 600 },
+      nodes: specs(tick).map(([id, parentId, role, extra]) => ({
+        id,
+        parentId,
+        backendNodeId: id,
+        frameId: "frame",
+        tag: role,
+        role,
+        name: "",
+        rect: { x: 0, y: 0, w: 20, h: 20 },
+        paintOrder: 1,
+        position: "static",
+        pointerEvents: "auto",
+        ...extra,
+      })),
+    });
+    // Resolves "eN" refs to backend node N.
+    const refs = () =>
+      vi.mocked(resolveActionTarget).mockImplementation(
+        async (_c, _s, _t, params) =>
+          ({
+            backendNodeId: Number((params as { ref?: string }).ref?.replace(/^@?e/, "")),
+            frameId: "frame",
+            cdpTarget: { tabId: 7 },
+            tab: { tabId: 7 },
+          }) as Awaited<ReturnType<typeof resolveActionTarget>>,
+      );
+    const run = (
+      f: Awaited<ReturnType<typeof fixture>>,
+      context: string,
+      action: { ref?: string; dependsOn?: string[]; key?: string },
+    ) => {
+      f.change({ structure: f.controller.view(7)!.revision + 100 });
+      return f.controller.run(
+        {
+          id: "live",
+          method: action.key ? "tool.press" : "tool.click",
+          params: {
+            session_id: "shared",
+            tab_id: 7,
+            context_id: context,
+            ...(action.ref ? { ref: action.ref } : {}),
+            ...(action.key ? { key: action.key } : {}),
+            ...(action.dependsOn ? { depends_on: action.dependsOn } : {}),
+          },
+        },
+        f.cdp,
+        f.abort.signal,
+        (runner) => runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" }),
+      ) as Promise<Record<string, any>>;
+    };
+    const changed = "The action's observed content changed; synchronize and replan";
+    /** One learning refusal, then `attempts` fresh-sync actions all succeed. */
+    const learnsThenActs = async (
+      build: (tick: number) => VomScene,
+      action: { ref?: string; dependsOn?: string[] },
+      attempts = 2,
+    ) => {
+      live(build);
+      refs();
+      const f = await fixture();
+      expect((await run(f, f.first.context_id, action)).message).toContain("changed by itself");
+      for (let attempt = 0; attempt < attempts; attempt++)
+        expect(await run(f, (await f.command("sync")).context_id, action)).toEqual({});
+      expect(f.native).toHaveBeenCalledTimes(attempts);
+    };
+    /** Every fresh-sync action keeps being refused without dispatching input. */
+    const keepsRefusing = async (
+      build: (tick: number) => VomScene,
+      action: { ref?: string; dependsOn?: string[]; key?: string },
+    ) => {
+      live(build);
+      refs();
+      const f = await fixture();
+      for (let attempt = 0, context = f.first.context_id; attempt < 3; attempt++) {
+        expect(await run(f, context, action)).toMatchObject({
+          data: { reason: "cooperation_sync_required", effect_state: "none" },
+        });
+        context = (await f.command("sync")).context_id;
+      }
+      expect(f.native).not.toHaveBeenCalled();
+    };
+    const clock = (tick: number) => `10:00:0${tick}`;
+
+    it("tolerates a clock beside a button directly inside <main>", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("tolerates a clock on a page without any landmark", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "body"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("tolerates a clock that mirrors its time into aria-label and title", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "body"],
+          [2, 1, "form"],
+          [3, 2, "button", { name: "Continue" }],
+          [
+            4,
+            1,
+            "timer",
+            { text: clock(tick), attrs: { "aria-label": clock(tick), title: clock(tick) } },
+          ],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("lets declared dependencies coexist with a clock in the target's <main>", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+          [5, null, "form"],
+          [6, 5, "textbox", { name: "Quantity", value: "1" }],
+        ]),
+        { ref: "e3", dependsOn: ["e6"] },
+      ));
+
+    it("never tolerates key presses or other actions without a resolved target", () =>
+      keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { key: "Enter" },
+      ));
+
+    it("keeps a learned node exact for a later key press on its form", async () => {
+      // Clicking Continue in form A learns the price in form B; Enter on the
+      // focused form B must still require the price observed at sync.
+      live(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "form", { name: "A" }],
+          [4, 2, "button", { name: "Continue" }],
+          [6, 1, "form", { name: "B" }],
+          [7, 6, "span", { text: `$${100 + tick}` }],
+          [8, 6, "button", { name: "Pay" }],
+        ]),
+      );
+      refs();
+      const f = await fixture();
+      expect((await run(f, f.first.context_id, { ref: "e4" })).message).toContain(
+        "changed by itself",
+      );
+      expect(await run(f, (await f.command("sync")).context_id, { key: "Enter" })).toMatchObject({
+        message: changed,
+        data: { effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("never tolerates changes to the target or its contents", async () => {
+      await keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: `Buy for $${100 + tick}` }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { ref: "e3" },
+      );
+      await keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 3, "span", { text: `$${100 + tick}` }],
+        ]),
+        { ref: "e3" },
+      );
+    });
+
+    it("keeps a countdown inside the target's own form exact", () =>
+      keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "form"],
+          [3, 2, "button", { name: "Pay" }],
+          [4, 2, "span", { text: `Expires in 0:0${9 - tick}` }],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("keeps a learned node exact when it shares a card with a later target", async () => {
+      // The price sits in an <article> card next to its Buy button.
+      live(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "button", { name: "Refresh" }],
+          [5, 1, "article"],
+          [6, 5, "span", { text: `$${100 + tick}` }],
+          [7, 5, "button", { name: "Buy" }],
+        ]),
+      );
+      refs();
+      const f = await fixture();
+      expect((await run(f, f.first.context_id, { ref: "e2" })).message).toContain(
+        "changed by itself",
+      );
+      expect(await run(f, (await f.command("sync")).context_id, { ref: "e2" })).toEqual({});
+      expect(await run(f, (await f.command("sync")).context_id, { ref: "e7" })).toMatchObject({
+        message: changed,
+      });
+      expect(f.native).toHaveBeenCalledOnce();
     });
 
     it("reports a ticking clock once instead of refusing every sync and action", async () => {

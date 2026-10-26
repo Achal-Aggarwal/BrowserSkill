@@ -114,3 +114,45 @@ it("never treats form values or modal content as page activity", () => {
     );
   }
 });
+
+it("reports aria-label and title rewrites as content changes", () => {
+  const before = [
+    node(1, null, "main"),
+    { ...node(2, 1, "timer"), attrs: { "aria-label": "10:00" } },
+  ];
+  const after = structuredClone(before);
+  after[1].attrs = { "aria-label": "10:01" };
+  expect(contentChanges({ nodes: before }, { nodes: after })).toEqual([
+    { key: "frame:2", before: "10:00", after: "10:01" },
+  ]);
+  const volatile = new Set(["frame:2"]);
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, undefined, volatile)).toBe(
+    true,
+  );
+});
+
+it("relaxes learned text only around targets in <main> or without a region", () => {
+  const volatile = new Set(["frame:4"]);
+  const check = (parent: string, sibling = true) => {
+    const before = [
+      node(1, null, "body"),
+      node(2, 1, parent),
+      node(3, 2, "button", "Buy"),
+      { ...node(4, sibling ? 2 : 3, "span"), text: "1" },
+    ];
+    const after = structuredClone(before);
+    after[3].text = "2";
+    return sameObservationEvidence(
+      { nodes: before },
+      { nodes: after },
+      { backendNodeId: 3 },
+      volatile,
+    );
+  };
+  expect(check("main")).toBe(true);
+  expect(check("div")).toBe(true);
+  for (const region of ["form", "dialog", "list", "table", "section", "article", "region"])
+    expect(check(region)).toBe(false);
+  // Text inside the target itself is never relaxed.
+  expect(check("main", false)).toBe(false);
+});
