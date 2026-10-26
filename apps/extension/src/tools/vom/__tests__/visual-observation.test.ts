@@ -939,3 +939,29 @@ it("preserves DOM labels for audit on the first and continuation pages", async (
     vi.stubGlobal("chrome", originalChrome);
   }
 });
+
+it.each([
+  // Real o200k cost of one `@eN button "<label> N"` row, newline included.
+  { name: "emoji with a variation selector", label: `${"😀".repeat(80)}❤️`, rowTokens: 90 },
+  {
+    name: "a short opaque id",
+    label: "Click here to download the qwertyuiopasdfghjklzxcvbnm file",
+    rowTokens: 29,
+  },
+])("keeps a budgeted page within its real token cost for labels with $name", async ({
+  label,
+  rowTokens,
+}) => {
+  const f = fixture(0, 1000);
+  f.scene.nodes.push(
+    ...Array.from({ length: 300 }, (_, i) => ({
+      ...node(i + 2, 1, "button", `${label} ${i}`),
+      rect: { x: 0, y: i * 35, w: 100, h: 30 },
+    })),
+  );
+  f.output.render = prepareObservationRender(f.scene);
+  const r = success(await publishObservationPage(f.store, f.cdp, 4, { output: f.output }));
+  expect(r.ref_count).toBeGreaterThan(0);
+  expect(r.next_cursor).toBeDefined();
+  expect(r.ref_count * rowTokens).toBeLessThanOrEqual(1000);
+});

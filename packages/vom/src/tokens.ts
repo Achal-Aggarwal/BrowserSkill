@@ -8,15 +8,19 @@
 // - longer or non-English words cost more per character;
 // - a run of spaces (VOM indentation) is one token, a digit group of up to
 //   three is one token;
-// - punctuation runs cost about one token per two characters;
+// - letter runs made of uncommon letter pairs (ids, hashes) cost ~1 token
+//   per 1.9 letters, however short;
+// - punctuation runs cost about one token per two characters; emoji and other
+//   non-ASCII symbols cost 1-2 tokens each, and a variation selector adds to
+//   them rather than turning the run into a word;
 // - Han text costs ~0.76 token per character (Traditional ~0.93), kana ~0.66
 //   and Hangul ~0.47.
 //
 // We split text with the o200k pre-tokenizer regex and cost each piece with
 // a few fitted constants. No vocabulary is loaded. On a mixed corpus (repo
 // docs, CHANGELOG, code blocks, UI strings in 10 locales and VOM pages built
-// from them) the result lands within about ±6% of o200k on average for every
-// group, against 1.66x for English prose with the previous estimate
+// from them) the mean estimate is 1.02-1.16x of o200k for every group,
+// against 1.66x for English prose with the previous estimate
 // (`vom-script-v1`). SAFETY_FACTOR keeps the remaining error on the high side.
 //
 // Counts are o200k-equivalent. Other tokenizers differ: cl100k needs ~1.3x
@@ -32,7 +36,8 @@ const SAFETY_FACTOR = 1.05;
 const PIECE =
   /[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?:'[sStTmMdD]|'[rR][eE]|'[vV][eE]|'[lL][lL])?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?:'[sStTmMdD]|'[rR][eE]|'[vV][eE]|'[lL][lL])?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+/gu;
 
-const LETTER = /[\p{L}\p{M}]/u;
+const LETTER = /\p{L}/u;
+const MARK = /\p{M}/u;
 
 /** English function words: their share tells English text from other Latin-script languages. */
 const ENGLISH_FUNCTION_WORDS = new Set(
@@ -63,12 +68,30 @@ for (const word of "alertdialog columnheader combobox contentinfo gridcell listb
   VOM_WORDS.set(word, 2);
 for (const word of ["menuitemcheckbox", "menuitemradio", "radiogroup"]) VOM_WORDS.set(word, 3);
 
+/**
+ * The 150 most common letter pairs in English and other Latin-script UI text
+ * (86% of all pairs). Real words of 8+ letters are mostly made of them; random
+ * ids (`qwertyuiopasdf`, `hhcmgoofomhg…`) are not, and cost ~1.9 letters per token.
+ */
+const COMMON_BIGRAMS = new Set(
+  "ab ac ad ag ai al am an ap ar as at au av be bl bo br bs bu ca ce ch ci ck cl co cr ct da de di do ea ec ed ee ei el em en ep er es et ex fi fo ge gi ha he hi ho ia ic id ie ig il im in io ir is it ke la ld le li ll lo lu ma me mi mo mp na nc nd ne ng ni nn no ns nt nu oc ol om on op or os ot ou ov ow ox pa pe pl po pr pt qu ra rd re ri ro rs rt ru sa sc se sh si sk so ss st su ta te th ti to tr ts tt tu ue ui ul un up ur us ut va ve vi wi ws xt".split(
+    " ",
+  ),
+);
+const OPAQUE_MIN_LETTERS = 8;
+const OPAQUE_MAX_BIGRAM_SHARE = 0.45;
+
 // Fitted against o200k (gpt-tokenizer 2.9.0); see `__tests__/tokens.test.ts`.
 const W = {
   /** Extra cost per ASCII punctuation character beyond the first two in a run. */
   punctExtra: 0.2,
-  /** Extra cost per non-ASCII symbol (`•`, `→`, emoji) beyond the first character of a run. */
-  symbolExtra: 0.9,
+  /** Non-ASCII symbols, per code point. Most emoji are two tokens, most BMP symbols one or two. */
+  astralSymbol: 1.8,
+  bmpSymbol: 1.3,
+  /** CJK and general punctuation (`，`, `。`, `’`, `—`), usually one token. */
+  punctuationSymbol: 1,
+  /** Variation selectors (`U+FE0F`) and marks with no letter to attach to. */
+  modifier: 0.5,
   /** A word glued to a leading punctuation mark (`"Home`, `(see`, `/path`). */
   gluedPrefix: 0.35,
   /** Words: [length that is still one token, extra cost per character beyond it]. */
@@ -81,7 +104,7 @@ const W = {
   allCapsPerChar: 0.28,
   /** Extra per accented or other non-ASCII Latin letter. */
   nonAsciiLetter: 0.09,
-  /** Letter runs this long are identifiers or hashes, not words. */
+  /** Letter runs this long are identifiers or hashes, not words, whatever their letters. */
   identifierLength: 30,
   identifierCharsPerToken: 1.9,
   han: 0.76,
@@ -142,8 +165,46 @@ function scanText(pieces: string[]): { english: boolean; traditional: boolean } 
   return { english: words > 0 && functionWords / words >= ENGLISH_MIN_SHARE, traditional };
 }
 
-function wordCost(letters: number, upper: number, nonAscii: number, english: boolean): number {
-  if (letters >= W.identifierLength) return letters / W.identifierCharsPerToken;
+/** Weight of a non-ASCII code point that is not a letter or a CJK character. */
+function symbolWeight(cp: number): number {
+  if ((cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef)) return W.modifier;
+  if (
+    (cp >= 0x2000 && cp <= 0x206f) ||
+    (cp >= 0x3000 && cp <= 0x303f) ||
+    (cp >= 0xff00 && cp <= 0xffef)
+  )
+    return W.punctuationSymbol;
+  return cp > 0xffff ? W.astralSymbol : W.bmpSymbol;
+}
+
+/** A long ASCII letter run made mostly of uncommon letter pairs: an id or hash, not a word. */
+function isOpaque(piece: string): boolean {
+  let pairs = 0;
+  let common = 0;
+  let previous = -1;
+  for (let i = 0; i < piece.length; i++) {
+    const c = piece.charCodeAt(i) | 0x20;
+    if (c < 0x61 || c > 0x7a) {
+      previous = -1;
+      continue;
+    }
+    if (previous >= 0) {
+      pairs++;
+      if (COMMON_BIGRAMS.has(String.fromCharCode(previous, c))) common++;
+    }
+    previous = c;
+  }
+  return pairs > 0 && common / pairs < OPAQUE_MAX_BIGRAM_SHARE;
+}
+
+function wordCost(
+  letters: number,
+  upper: number,
+  nonAscii: number,
+  english: boolean,
+  opaque: boolean,
+): number {
+  if (letters >= W.identifierLength || opaque) return letters / W.identifierCharsPerToken;
   let cost: number;
   if (upper > 1 && upper === letters) {
     cost = 1 + (letters - 2) * W.allCapsPerChar;
@@ -177,7 +238,8 @@ function pieceCost(piece: string, english: boolean, traditional: boolean): numbe
   let upper = 0;
   let nonAscii = 0;
   let symbols = 0;
-  let wideSymbols = 0;
+  let wide = 0; // summed weight of non-ASCII symbols
+  let prefixWide = 0; // weight of a leading non-ASCII symbol, if any
   let glued = false;
   for (let i = 0; i < piece.length; i++) {
     let cp = piece.charCodeAt(i);
@@ -192,43 +254,54 @@ function pieceCost(piece: string, english: boolean, traditional: boolean): numbe
       }
       continue;
     }
+    const start = i;
     if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < piece.length) {
       cp = ((cp - 0xd800) << 10) + (piece.charCodeAt(++i) - 0xdc00) + 0x10000;
     }
     if (isHan(cp)) han++;
     else if (isKana(cp)) kana++;
     else if (isHangul(cp)) hangul++;
-    else if (LETTER.test(String.fromCodePoint(cp))) {
-      letters++;
-      nonAscii++;
-    } else {
-      wideSymbols++;
-      if (i === 0) glued = true;
+    else {
+      const ch = String.fromCodePoint(cp);
+      // A combining mark belongs to the letter before it (decomposed accents);
+      // anywhere else (an emoji's U+FE0F) it is a modifier, not a letter.
+      if (LETTER.test(ch) || (letters > 0 && MARK.test(ch) && symbolWeight(cp) !== W.modifier)) {
+        letters++;
+        nonAscii++;
+      } else {
+        const weight =
+          MARK.test(ch) && symbolWeight(cp) !== W.modifier ? W.modifier : symbolWeight(cp);
+        wide += weight;
+        if (start === 0) {
+          glued = true;
+          prefixWide = weight;
+        }
+      }
     }
   }
 
+  // Non-ASCII symbols after the first character keep their own cost in every kind of piece.
+  const extraWide = wide - prefixWide;
   if (han + kana + hangul > 0) {
-    let cost = glued ? W.gluedPrefix : 0;
+    let cost = (glued ? W.gluedPrefix : 0) + extraWide;
     if (kana > 0) cost += W.kanaBase + (kana + han) * W.kana;
     else if (han > 0) cost += W.hanBase + han * (traditional ? W.hanTraditional : W.han);
     if (hangul > 0) cost += W.hangulBase + hangul * W.hangul;
     return cost + letters / 4;
   }
   if (letters === 0) {
-    const firstIsWide = symbols === 0 ? 1 : 0;
-    return (
-      1 +
-      Math.max(0, symbols - 2) * W.punctExtra +
-      Math.max(0, wideSymbols - firstIsWide) * W.symbolExtra
-    );
+    const ascii = symbols > 0 ? 1 + Math.max(0, symbols - 2) * W.punctExtra : 0;
+    return Math.max(1, ascii + wide);
   }
   if (piece === "@e") return 2; // VOM ref marker at the start of a line: `@` and `e`
-  if (glued || wideSymbols > 0) return W.gluedPrefix + wordCost(letters, upper, nonAscii, english);
+  const opaque = letters >= OPAQUE_MIN_LETTERS && nonAscii === 0 && isOpaque(piece);
+  const word = wordCost(letters, upper, nonAscii, english, opaque);
+  if (glued || wide > 0) return W.gluedPrefix + extraWide + word;
   if (upper === 0 && nonAscii === 0) {
     const known = VOM_WORDS.get(piece.charCodeAt(0) === 0x20 ? piece.slice(1) : piece);
     if (known !== undefined) return known;
   }
-  return wordCost(letters, upper, nonAscii, english);
+  return word;
 }
 
 /** Unrounded estimate, for summing many short lines without rounding each. */

@@ -71,7 +71,15 @@ const FIXTURES: { name: string; text: string; reference: number }[] = [
     text: "https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi",
     reference: 24,
   },
+  {
+    name: "English sentence with a short opaque id",
+    text: "Click here to download the qwertyuiopasdfghjklzxcvbnm file",
+    reference: 20,
+  },
 ];
+
+// o200k: 80 tokens for the smileys, 1 for the heart and its U+FE0F.
+const SMILEYS = "😀".repeat(80);
 
 describe("estimateTokens", () => {
   it.each(FIXTURES)("stays within -10%/+30% of the reference for $name", ({ text, reference }) => {
@@ -112,8 +120,40 @@ describe("estimateTokens", () => {
     expect(estimateLineTokens("")).toBe(1);
   });
 
-  it("counts an astral character as one symbol, not two", () => {
-    expect(estimateTokens("😀")).toBe(estimateTokens("!"));
+  it("counts a surrogate pair as one symbol, not two", () => {
+    expect(estimateLineTokens("😀") - 1).toBeLessThan(2);
+  });
+
+  it("keeps the cost of every emoji when a variation selector follows one", () => {
+    expect(estimateTokens(`${SMILEYS}❤️`)).toBeGreaterThanOrEqual(81);
+    expect(estimateTokens(`${SMILEYS}❤️`)).toBeGreaterThan(estimateTokens(SMILEYS));
+    expect(estimateTokens(`Saved ${SMILEYS}❤️`)).toBeGreaterThan(estimateTokens(`Saved ${SMILEYS}`));
+  });
+
+  it("never lowers the estimate when a symbol is appended", () => {
+    for (const text of [SMILEYS, "Home", '"首页', "장바구니", "→ next", "a\u0301"]) {
+      for (const symbol of ["❤️", "\ufe0f", "\u0301", "👍🏽", "!", "，"]) {
+        expect(estimateTokens(text + symbol)).toBeGreaterThanOrEqual(estimateTokens(text));
+      }
+    }
+  });
+
+  it("treats a combining accent after a letter as part of the word", () => {
+    expect(estimateTokens("cafe\u0301")).toBeLessThanOrEqual(estimateTokens("café") + 1);
+  });
+
+  it("costs short opaque ids by their letters, not as English words", () => {
+    // o200k: the 26-letter id alone is 13 tokens.
+    expect(estimateTokens(" qwertyuiopasdfghjklzxcvbnm")).toBeGreaterThanOrEqual(12);
+    expect(estimateTokens("Your order hzqxkvbtmw ships")).toBeGreaterThan(
+      estimateTokens("Your order successfully ships"),
+    );
+  });
+
+  it("does not mistake long English words for ids", () => {
+    // o200k: 4 and 8 tokens.
+    expect(estimateTokens("Download the configuration file")).toBeLessThanOrEqual(5);
+    expect(estimateTokens("Read about the internationalization of the app")).toBeLessThanOrEqual(9);
   });
 
   it("sums per-line costs without rounding each line", () => {
