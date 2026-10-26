@@ -499,6 +499,129 @@ describe("shared-tab dispatch fences", () => {
     }
     expect(resolveActionTarget).toHaveBeenCalled();
   });
+  describe("self-changing page content", () => {
+    // A clock (node 5) ticks on every observation; the action targets node 4.
+    const scene = (clock: string, button = "Continue", extra = false): VomScene => ({
+      viewport: { width: 800, height: 600 },
+      nodes: [
+        { id: 1, parentId: null, tag: "main", name: "", role: "main" },
+        { id: 2, parentId: 1, tag: "form", name: "", role: "form" },
+        { id: 4, parentId: 2, tag: "button", name: button, role: "button" },
+        { id: 5, parentId: 1, tag: "span", name: "", text: clock },
+        ...(extra ? [{ id: 6, parentId: 1, tag: "p", name: "", text: "Sold out" }] : []),
+      ].map((node) => ({
+        ...node,
+        backendNodeId: node.id,
+        frameId: "frame",
+        rect: { x: 0, y: 0, w: 20, h: 20 },
+        paintOrder: 1,
+        position: "static",
+        pointerEvents: "auto",
+      })),
+    });
+    const live = (next: (tick: number) => VomScene) => {
+      let tick = 0;
+      vi.mocked(handleSnapshot).mockImplementation(async (_m, _p, deps) => {
+        deps!.onScene?.(next(tick++));
+        return { text: "Continue", ref_count: 1, tab_id: 7, truncated: false };
+      });
+      vi.mocked(captureVomObservation).mockImplementation(async (_c, _t, _u, options) => {
+        options?.onScene?.(next(tick++));
+        return {} as Awaited<ReturnType<typeof captureVomObservation>>;
+      });
+    };
+    const act = (f: Awaited<ReturnType<typeof fixture>>, context: string, dependsOn?: string[]) =>
+      f.controller.run(
+        {
+          id: "live",
+          method: "tool.click",
+          params: {
+            session_id: "shared",
+            tab_id: 7,
+            context_id: context,
+            ref: "e4",
+            ...(dependsOn ? { depends_on: dependsOn } : {}),
+          },
+        },
+        f.cdp,
+        f.abort.signal,
+        (runner) => runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" }),
+      ) as Promise<Record<string, any>>;
+    // Every mutation of the live region also bumps the structure counter.
+    const cycle = async (
+      f: Awaited<ReturnType<typeof fixture>>,
+      context: string,
+      deps?: string[],
+    ) => {
+      f.change({ structure: f.controller.view(7)!.revision + 100 });
+      return act(f, context, deps);
+    };
+    afterEach(() => {
+      vi.mocked(handleSnapshot).mockReset();
+      vi.mocked(resolveActionTarget).mockReset();
+    });
+
+    it("reports a ticking clock once instead of refusing every sync and action", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      const f = await fixture();
+      const refused = await cycle(f, f.first.context_id);
+      expect(refused).toMatchObject({
+        message: expect.stringContaining('"10:00:00" → "10:00:01"'),
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(refused.message).toContain("--depends-on");
+      expect(f.native).not.toHaveBeenCalled();
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const synced = await f.command("sync");
+        expect(synced.context_id).toBeTruthy();
+        expect(await cycle(f, synced.context_id)).toEqual({});
+      }
+      expect(f.native).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps refusing when the action's own region changes", async () => {
+      live((tick) => scene("10:00:00", `Pay ${tick}`));
+      const f = await fixture();
+      for (let attempt = 0, context = f.first.context_id; attempt < 2; attempt++) {
+        expect(await cycle(f, context)).toMatchObject({
+          message: "The action's observed content changed; synchronize and replan",
+        });
+        context = (await f.command("sync")).context_id;
+      }
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("still refuses new content beside a tolerated clock", async () => {
+      live((tick) => scene(`10:00:0${tick}`, "Continue", tick >= 3));
+      const f = await fixture();
+      expect((await cycle(f, f.first.context_id)).message).toContain("changed by itself");
+      const synced = await f.command("sync");
+      expect(await cycle(f, synced.context_id)).toMatchObject({
+        message: "The action's observed content changed; synchronize and replan",
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("keeps explicit dependencies exact after learning page activity", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      vi.mocked(resolveActionTarget).mockImplementation(
+        async (_c, _s, _t, params) =>
+          ({
+            backendNodeId: (params as { ref?: string }).ref === "e5" ? 5 : 4,
+            frameId: "frame",
+            cdpTarget: { tabId: 7 },
+            tab: { tabId: 7 },
+          }) as Awaited<ReturnType<typeof resolveActionTarget>>,
+      );
+      const f = await fixture();
+      expect((await cycle(f, f.first.context_id)).message).toContain("changed by itself");
+      const synced = await f.command("sync");
+      expect(await cycle(f, synced.context_id, ["e5"])).toMatchObject({
+        message: "The action's observed content changed; synchronize and replan",
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+  });
   it("uses updated field evidence after a delta when a later cosmetic mutation occurs", async () => {
     const scene = (value: string): VomScene => ({
       viewport: { width: 800, height: 600 },

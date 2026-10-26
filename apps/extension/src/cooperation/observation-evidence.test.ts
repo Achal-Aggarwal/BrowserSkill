@@ -1,6 +1,6 @@
 import type { VomNode } from "@browser-skill/vom";
 import { expect, it } from "vitest";
-import { sameObservationEvidence } from "./observation-evidence";
+import { contentChanges, sameObservationEvidence } from "./observation-evidence";
 
 const node = (id: number, parentId: number | null, role: string, name = ""): VomNode => ({
   id,
@@ -69,4 +69,48 @@ it("checks fields outside the action region and falls back to the whole document
   after[5].value = "B";
   expect(sameObservationEvidence({ nodes: before }, { nodes: after }, target)).toBe(false);
   expect(sameObservationEvidence({ nodes: scene() }, { nodes: after })).toBe(false);
+});
+
+it("identifies in-place text changes and tolerates only those in the whole-page check", () => {
+  const before = scene();
+  before.push({ ...node(6, 1, "timer"), text: "10:00:00" });
+  const after = structuredClone(before);
+  after[5].text = "10:00:01";
+  expect(contentChanges({ nodes: before }, { nodes: after })).toEqual([
+    { key: "frame:6", before: "10:00:00", after: "10:00:01" },
+  ]);
+  const volatile = new Set(["frame:6"]);
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, undefined, volatile)).toBe(
+    true,
+  );
+  for (const change of ["removed", "disabled", "hidden", "added"]) {
+    const next = structuredClone(after);
+    if (change === "removed") next.pop();
+    if (change === "disabled") next[5].disabled = true;
+    if (change === "hidden") next[5].rect = { x: 0, y: 0, w: 0, h: 0 };
+    if (change === "added") next.push(node(7, 1, "status", "Sold out"));
+    expect(sameObservationEvidence({ nodes: before }, { nodes: next }, undefined, volatile)).toBe(
+      false,
+    );
+    expect(contentChanges({ nodes: before }, { nodes: next }, volatile)).toBeUndefined();
+  }
+  // Explicit targets never use the tolerated set.
+  expect(
+    sameObservationEvidence({ nodes: before }, { nodes: after }, { backendNodeId: 6 }, volatile),
+  ).toBe(false);
+});
+
+it("never treats form values or modal content as page activity", () => {
+  const before = scene();
+  before.push({ ...node(6, 1, "textbox", "Amount"), value: "1" });
+  before.push({ ...node(7, 1, "dialog", "Confirm"), modal: true });
+  for (const index of [5, 6]) {
+    const after = structuredClone(before);
+    after[index].name = "changed";
+    const volatile = new Set([`frame:${index + 1}`]);
+    expect(contentChanges({ nodes: before }, { nodes: after })).toBeUndefined();
+    expect(sameObservationEvidence({ nodes: before }, { nodes: after }, undefined, volatile)).toBe(
+      false,
+    );
+  }
 });

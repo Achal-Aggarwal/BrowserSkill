@@ -30,8 +30,11 @@ The default guard checks the whole observed page. When the decision depends on k
 CLI actions can repeat `--depends-on @eN` (the plugin uses `dependsOn: ["@eN"]`). Include every
 region used in the decision: for example both the options list and the current form. The target's
 form/list/dialog, all form values, and modal state remain protected. If the dependency set is
-uncertain, omit it and retain whole-page checking. Dependencies must come from the current
-observation; they do not authorize replaying an old plan. Cosmetic changes still require a
+uncertain, omit it and retain whole-page checking. Text outside the target's region that changes
+by itself between sync and action (a clock, a counter) is reported once with the before/after
+text; after you sync and replan, the default check tolerates further text-only changes there.
+If the decision relies on such text, declare it with `--depends-on`, which stays exact.
+Dependencies must come from the current observation; they do not authorize replaying an old plan. Cosmetic changes still require a
 live target and hit check. Readonly pickers and discrete controls return control automatically;
 text editing, composition, held keys and dragging keep the person's lease until they finish.
 

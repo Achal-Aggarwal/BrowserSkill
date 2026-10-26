@@ -11,6 +11,7 @@ import type { RequestFrame, RpcError } from "@/transport/types";
 import { guardedRunner } from "./action-guard";
 import { type ControlAuthority, ControlAuthorityError } from "./control-authority";
 import {
+  contentChanges,
   type ObservationEvidence,
   observationEvidence,
   sameObservationEvidence,
@@ -60,6 +61,11 @@ interface TabState {
   controlRevision: number;
   /** Revokes permission guards on human intervention, independently of page revisions. */
   authorityRevision: number;
+  /**
+   * Nodes whose text changed by itself between a sync and an action (clocks,
+   * counters, tickers), keyed to the documents they were observed in.
+   */
+  volatile?: { documents: string; keys: Set<string> };
 }
 export interface CooperationDeps {
   sessions: SessionManager;
@@ -98,6 +104,8 @@ const PASSIVE_DEBUG = new Set<string>(
   ),
 );
 const QUIET_MS = 650;
+/** Upper bound on nodes whose self-changing text the default check tolerates. */
+const MAX_VOLATILE = 256;
 
 function isInitialBlank(tab: { url?: string; pendingUrl?: string }): boolean {
   // Chrome can report the agent-created blank page before its initial load commits.
@@ -115,6 +123,12 @@ function sameFrames(a: Frames, b: Frames, field: "revision" | "structure" | "hum
       return other?.document === state.document && other[field] === state[field];
     })
   );
+}
+function documents(frames: Frames): string {
+  return JSON.stringify([...frames].map(([id, frame]) => [id, frame.document]));
+}
+function quote(text: string): string {
+  return JSON.stringify(text.length > 40 ? `${text.slice(0, 39)}…` : text);
 }
 function sameFields(a: Frames, b: Frames): boolean {
   return (
@@ -651,7 +665,7 @@ export class CooperationController implements ControlAuthority {
             }),
           state: { ...this.view(state.tabId), mode: "ready" },
           guidance:
-            "Continue toward the assigned goal using this current state. Incorporate helpful progress and correct recoverable mistakes. Page activity is not a change of goal. Each context authorizes one action; sync after it. By default the whole page is checked. To tolerate unrelated updates, declare all observed decision regions with --depends-on refs/selectors (plugin: dependsOn); the target region and form values remain protected. Verify completion and prior submissions from application evidence.",
+            "Continue toward the assigned goal using this current state. Incorporate helpful progress and correct recoverable mistakes. Page activity is not a change of goal. Each context authorizes one action; sync after it. By default the whole page is checked; text seen changing by itself outside the target region (clocks, counters) is reported once and then tolerated. To tolerate other unrelated updates, declare all observed decision regions with --depends-on refs/selectors (plugin: dependsOn); the target region and form values remain protected. Verify completion and prior submissions from application evidence.",
         };
       } finally {
         state.working = false;
@@ -963,6 +977,7 @@ export class CooperationController implements ControlAuthority {
     const epoch = state.epoch;
     let verifiedFrames = context?.frames;
     let evidenceTargets: { backendNodeId: number; frameId?: string }[] | undefined;
+    let actionTarget: { backendNodeId: number; frameId?: string } | undefined;
     state.working = true;
     const intervention = new AbortController();
     state.interruption = intervention;
@@ -1001,17 +1016,46 @@ export class CooperationController implements ControlAuthority {
       });
       await this.refresh(state);
       assert();
-      if (
-        !evidence ||
-        !(evidenceTargets ?? [undefined]).every((dependency) =>
-          sameObservationEvidence(context.evidence!, evidence!, dependency),
-        )
-      )
+      if (!evidence)
         throw new Error(
           (revoked = "The action's observed content changed; synchronize and replan"),
         );
-      // Keep the pre-capture revision: later mutations must be checked again.
-      verifiedFrames = before;
+      // Explicit dependencies stay exact. The default whole-page check tolerates
+      // text that was already seen changing by itself in these documents.
+      const pages = documents(state.frames);
+      const learning = !evidenceTargets && !params.depends_on?.length;
+      const volatile =
+        learning && state.volatile?.documents === pages ? state.volatile.keys : undefined;
+      if (
+        evidenceTargets
+          ? evidenceTargets.every((dependency) =>
+              sameObservationEvidence(context.evidence!, evidence!, dependency),
+            )
+          : sameObservationEvidence(context.evidence!, evidence!, undefined, volatile)
+      ) {
+        // Keep the pre-capture revision: later mutations must be checked again.
+        verifiedFrames = before;
+        return;
+      }
+      // Learn page activity only from in-place text changes outside the target
+      // region with no human input since the sync. The agent still replans once.
+      const changes =
+        learning &&
+        sameFrames(context.frames, state.frames, "human") &&
+        (!actionTarget || sameObservationEvidence(context.evidence, evidence, actionTarget))
+          ? contentChanges(context.evidence, evidence, volatile)
+          : undefined;
+      if (changes && (volatile?.size ?? 0) + changes.length <= MAX_VOLATILE) {
+        state.volatile = {
+          documents: pages,
+          keys: new Set([...(volatile ?? []), ...changes.map((change) => change.key)]),
+        };
+        const [first] = changes;
+        throw new Error(
+          (revoked = `Page content outside the action's region changed by itself (${quote(first.before)} → ${quote(first.after)}${changes.length > 1 ? ` and ${changes.length - 1} more` : ""}); synchronize and replan. Later text-only changes there will not block actions without --depends-on; declare them as dependencies if the decision relies on them`),
+        );
+      }
+      throw new Error((revoked = "The action's observed content changed; synchronize and replan"));
     };
     try {
       await this.refresh(state);
@@ -1032,6 +1076,7 @@ export class CooperationController implements ControlAuthority {
           "shared action",
         );
         if (isRpcError(resolved)) return resolved;
+        actionTarget = resolved;
         if (params.depends_on?.length) evidenceTargets = [resolved];
       }
       if (params.depends_on !== undefined) {
