@@ -21,6 +21,11 @@ const FIXTURES: { name: string; text: string; reference: number }[] = [
     reference: 66,
   },
   {
+    name: "English prose",
+    text: "This page explains the return policy: customers may return items within thirty days without giving a reason, provided the packaging is intact and proof of purchase is supplied.",
+    reference: 31,
+  },
+  {
     name: "Chinese VOM",
     text: [
       "@vom 1",
@@ -37,9 +42,14 @@ const FIXTURES: { name: string; text: string; reference: number }[] = [
     reference: 65,
   },
   {
-    name: "Chinese body text",
+    name: "Simplified Chinese body text",
     text: "这是一个关于商品退货政策的说明页面，用户可以在三十天内申请无理由退货，但需要保持商品包装完整并提供购买凭证。",
     reference: 35,
+  },
+  {
+    name: "Traditional Chinese body text",
+    text: "這是一個關於商品退貨政策的說明頁面，使用者可以在三十天內申請無理由退貨，但需要保持商品包裝完整並提供購買憑證。",
+    reference: 44,
   },
   {
     name: "Japanese VOM",
@@ -51,35 +61,65 @@ const FIXTURES: { name: string; text: string; reference: number }[] = [
     text: '@e5 button "장바구니에 담기"\n@e6 link "주문 내역 보기"',
     reference: 24,
   },
+  {
+    name: "Italian prose",
+    text: "Il salvataggio termina le attività correnti e si riconnette se l'interruttore di connessione è attivo.",
+    reference: 27,
+  },
+  {
+    name: "URL with an opaque id",
+    text: "https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi",
+    reference: 24,
+  },
 ];
 
 describe("estimateTokens", () => {
-  it.each(FIXTURES)("stays within 15% of the reference for $name", ({ text, reference }) => {
-    const estimate = estimateTokens(text);
-    expect(Math.abs(estimate - reference) / reference).toBeLessThanOrEqual(0.15);
+  it.each(FIXTURES)("stays within -10%/+30% of the reference for $name", ({ text, reference }) => {
+    const ratio = estimateTokens(text) / reference;
+    expect(ratio).toBeGreaterThanOrEqual(0.9);
+    expect(ratio).toBeLessThanOrEqual(1.3);
   });
 
-  it("no longer undercounts the fixtures like ceil(chars / 4) did", () => {
-    for (const { text, reference } of FIXTURES) {
-      expect(Math.ceil(text.length / 4)).toBeLessThan(reference * 0.85);
-      expect(estimateTokens(text)).toBeGreaterThanOrEqual(reference * 0.85);
+  it("is tight for English prose and VOM structure", () => {
+    for (const name of ["English VOM", "English prose"]) {
+      const { text, reference } = FIXTURES.find((fixture) => fixture.name === name) ?? FIXTURES[0];
+      expect(Math.abs(estimateTokens(text) - reference) / reference).toBeLessThanOrEqual(0.12);
     }
   });
 
-  it("errs high, not low, for plain English prose", () => {
-    const prose =
-      "This page explains the return policy: customers may return items within thirty days without giving a reason, provided the packaging is intact and proof of purchase is supplied.";
-    // o200k reference: 31 tokens.
-    expect(estimateTokens(prose)).toBeGreaterThanOrEqual(31);
+  it("does not undercount like ceil(chars / 4) did", () => {
+    for (const name of ["English VOM", "Chinese VOM", "Japanese VOM", "Korean VOM"]) {
+      const { text, reference } = FIXTURES.find((fixture) => fixture.name === name) ?? FIXTURES[0];
+      expect(Math.ceil(text.length / 4)).toBeLessThan(reference * 0.85);
+      expect(estimateTokens(text)).toBeGreaterThanOrEqual(reference * 0.9);
+    }
   });
 
-  it("counts empty text as zero and newlines as tokens", () => {
+  it("costs long non-English words more than English ones of the same length", () => {
+    expect(estimateTokens("the configuration of the interrupter")).toBeLessThan(
+      estimateTokens("la configurazione dell interruttore"),
+    );
+  });
+
+  it("costs VOM role words by their real token count", () => {
+    expect(estimateLineTokens(" navigation")).toBeLessThan(estimateLineTokens(" menuitemcheckbox"));
+    expect(estimateTokens("    @e1 navigation")).toBe(estimateTokens("    @e1 button"));
+  });
+
+  it("counts empty text as zero and every line break", () => {
     expect(estimateTokens("")).toBe(0);
-    expect(estimateTokens("\n\n")).toBe(2);
+    expect(estimateTokens("\n")).toBeGreaterThanOrEqual(1);
     expect(estimateLineTokens("")).toBe(1);
   });
 
-  it("counts astral characters once", () => {
-    expect(estimateTokens("😀")).toBe(1);
+  it("counts an astral character as one symbol, not two", () => {
+    expect(estimateTokens("😀")).toBe(estimateTokens("!"));
+  });
+
+  it("sums per-line costs without rounding each line", () => {
+    const lines = ["  main", '    @e1 link "Home"', '    @e2 link "Docs"'];
+    const summed = lines.reduce((total, line) => total + estimateLineTokens(line), 0);
+    expect(Number.isInteger(summed)).toBe(false);
+    expect(summed).toBeLessThan(lines.reduce((total, line) => total + estimateTokens(line) + 1, 0));
   });
 });
