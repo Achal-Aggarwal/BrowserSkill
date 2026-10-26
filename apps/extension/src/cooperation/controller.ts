@@ -65,7 +65,13 @@ interface TabState {
    * Nodes whose text changed by itself between a sync and an action (clocks,
    * counters, tickers), keyed to the documents they were observed in.
    */
-  volatile?: { documents: string; keys: Set<string> };
+  volatile?: Volatile;
+  /** Changes learned from a refused action; active only after a fresh sync. */
+  learned?: Volatile;
+}
+interface Volatile {
+  documents: string;
+  keys: Set<string>;
 }
 export interface CooperationDeps {
   sessions: SessionManager;
@@ -616,6 +622,19 @@ export class CooperationController implements ControlAuthority {
         };
         state.context = context;
         state.baseline = context;
+        // The agent has now observed the refused change; tolerate it from here on.
+        if (state.learned) {
+          const pages = documents(before);
+          if (state.learned.documents === pages)
+            state.volatile = {
+              documents: pages,
+              keys: new Set([
+                ...(state.volatile?.documents === pages ? state.volatile.keys : []),
+                ...state.learned.keys,
+              ]),
+            };
+          state.learned = undefined;
+        }
         const activity = state.activity.filter(
           (event) => event.cursor > (baseline?.activityCursor ?? 0),
         );
@@ -1016,39 +1035,55 @@ export class CooperationController implements ControlAuthority {
       });
       await this.refresh(state);
       assert();
-      if (!evidence)
+      // A refusal always requires a fresh sync; the refused context cannot retry.
+      const consumeRefused = () => {
+        if (state.context !== context) return;
+        state.context = undefined;
+        this.changed(state);
+      };
+      if (!evidence) {
+        consumeRefused();
         throw new Error(
           (revoked = "The action's observed content changed; synchronize and replan"),
         );
+      }
       // Explicit dependencies stay exact. The default whole-page check tolerates
       // text that was already seen changing by itself in these documents.
       const pages = documents(state.frames);
       const learning = !evidenceTargets && !params.depends_on?.length;
       const volatile =
         learning && state.volatile?.documents === pages ? state.volatile.keys : undefined;
+      // The action's own region stays exact even when it holds learned nodes.
+      const targetIntact =
+        !actionTarget || sameObservationEvidence(context.evidence, evidence, actionTarget);
       if (
         evidenceTargets
           ? evidenceTargets.every((dependency) =>
               sameObservationEvidence(context.evidence!, evidence!, dependency),
             )
-          : sameObservationEvidence(context.evidence!, evidence!, undefined, volatile)
+          : targetIntact &&
+            sameObservationEvidence(context.evidence!, evidence!, undefined, volatile)
       ) {
         // Keep the pre-capture revision: later mutations must be checked again.
         verifiedFrames = before;
         return;
       }
+      consumeRefused();
       // Learn page activity only from in-place text changes outside the target
       // region with no human input since the sync. The agent still replans once.
       const changes =
-        learning &&
-        sameFrames(context.frames, state.frames, "human") &&
-        (!actionTarget || sameObservationEvidence(context.evidence, evidence, actionTarget))
+        learning && targetIntact && sameFrames(context.frames, state.frames, "human")
           ? contentChanges(context.evidence, evidence, volatile)
           : undefined;
-      if (changes && (volatile?.size ?? 0) + changes.length <= MAX_VOLATILE) {
-        state.volatile = {
+      const pending = state.learned?.documents === pages ? state.learned.keys : undefined;
+      if (
+        changes &&
+        (volatile?.size ?? 0) + (pending?.size ?? 0) + changes.length <= MAX_VOLATILE
+      ) {
+        // Learned keys stay inactive until the agent observes them in a new sync.
+        state.learned = {
           documents: pages,
-          keys: new Set([...(volatile ?? []), ...changes.map((change) => change.key)]),
+          keys: new Set([...(pending ?? []), ...changes.map((change) => change.key)]),
         };
         const [first] = changes;
         throw new Error(

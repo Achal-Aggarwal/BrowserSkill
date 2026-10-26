@@ -621,6 +621,79 @@ describe("shared-tab dispatch fences", () => {
       });
       expect(f.native).not.toHaveBeenCalled();
     });
+
+    it("does not let a refused context retry with newly learned tolerance", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      const f = await fixture();
+      expect((await cycle(f, f.first.context_id)).message).toContain("changed by itself");
+      expect(await cycle(f, f.first.context_id)).toMatchObject({
+        message: "This action requires the context returned by the latest cooperate sync",
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+      // The fresh observation activates the learned clock, preserving the loop fix.
+      const synced = await f.command("sync");
+      expect(await cycle(f, synced.context_id)).toEqual({});
+      expect(f.native).toHaveBeenCalledOnce();
+    });
+
+    it("keeps a learned node exact when it belongs to a later action's region", async () => {
+      // Form A holds Continue (4); form B holds a changing price (7) and Pay (8).
+      const shop = (price: string): VomScene => ({
+        viewport: { width: 800, height: 600 },
+        nodes: [
+          { id: 1, parentId: null, tag: "main", name: "", role: "main" },
+          { id: 2, parentId: 1, tag: "form", name: "A", role: "form" },
+          { id: 4, parentId: 2, tag: "button", name: "Continue", role: "button" },
+          { id: 6, parentId: 1, tag: "form", name: "B", role: "form" },
+          { id: 7, parentId: 6, tag: "span", name: "", text: price },
+          { id: 8, parentId: 6, tag: "button", name: "Pay", role: "button" },
+        ].map((node) => ({
+          ...node,
+          backendNodeId: node.id,
+          frameId: "frame",
+          rect: { x: 0, y: 0, w: 20, h: 20 },
+          paintOrder: 1,
+          position: "static",
+          pointerEvents: "auto",
+        })),
+      });
+      live((tick) => shop(`$${100 + tick}`));
+      vi.mocked(resolveActionTarget).mockImplementation(
+        async (_c, _s, _t, params) =>
+          ({
+            backendNodeId: (params as { ref?: string }).ref === "e8" ? 8 : 4,
+            frameId: "frame",
+            cdpTarget: { tabId: 7 },
+            tab: { tabId: 7 },
+          }) as Awaited<ReturnType<typeof resolveActionTarget>>,
+      );
+      const click = (f: Awaited<ReturnType<typeof fixture>>, context: string, ref: string) => {
+        f.change({ structure: f.controller.view(7)!.revision + 100 });
+        return f.controller.run(
+          {
+            id: "shop",
+            method: "tool.click",
+            params: { session_id: "shared", tab_id: 7, context_id: context, ref },
+          },
+          f.cdp,
+          f.abort.signal,
+          (runner) => runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" }),
+        ) as Promise<Record<string, any>>;
+      };
+      const f = await fixture();
+      // Acting in form A learns the price in form B as page activity.
+      expect((await click(f, f.first.context_id, "e4")).message).toContain("changed by itself");
+      // Form A actions now tolerate the price...
+      expect(await click(f, (await f.command("sync")).context_id, "e4")).toEqual({});
+      expect(f.native).toHaveBeenCalledOnce();
+      // ...but paying in form B still requires the price observed at sync.
+      expect(await click(f, (await f.command("sync")).context_id, "e8")).toMatchObject({
+        message: "The action's observed content changed; synchronize and replan",
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(f.native).toHaveBeenCalledOnce();
+    });
   });
   it("uses updated field evidence after a delta when a later cosmetic mutation occurs", async () => {
     const scene = (value: string): VomScene => ({
