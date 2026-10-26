@@ -220,7 +220,8 @@ describe("visual observation output", () => {
     expect(next.ref_count).toBeGreaterThan(0);
   });
   it("shrinks a long visual label, preserving its complete capability marker", async () => {
-    const f = fixture(1, 45);
+    // Far below the ~340-token full label, so the row must shrink to its minimal form.
+    const f = fixture(1, 70);
     f.scene.visuals![0].label = 'bad\n" ' + "x".repeat(1000);
     f.output.render = prepareObservationRender(f.scene);
     const r = success(await publishObservationPage(f.store, f.cdp, 4, { output: f.output }));
@@ -796,7 +797,7 @@ it("an old cancelled validation cannot clear a newer observation", async () => {
 });
 
 it("keeps excluded Canvas out of every continuation page", async () => {
-  const f = fixture(36, 100);
+  const f = fixture(36, 110); // Room for the modal context header plus one row per page.
   f.scene.rootFrameId = "top";
   f.scene.nodes.push({
     ...node(10, 1, "dialog", "Login"),
