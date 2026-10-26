@@ -143,7 +143,7 @@ mod platform {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
     use tokio::time::{sleep, timeout};
-    use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_PIPE_BUSY};
 
     use crate::ipc_client::{RpcOutcome, random_id};
 
@@ -177,6 +177,15 @@ mod platform {
                         Ok(client) => return Ok::<NamedPipeClient, anyhow::Error>(client),
                         Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => {
                             sleep(Duration::from_millis(50)).await;
+                        }
+                        Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+                            return Err(anyhow::Error::from(err).context(format!(
+                                "connect IPC named pipe {name}: access denied. The pipe admits \
+                                 only the account that started the daemon, so a client running \
+                                 as another account (for example a sandbox user) cannot open \
+                                 it. See docs/sandboxed-agents.md, section \
+                                 \"Windows sandbox users\""
+                            )));
                         }
                         Err(err) => {
                             return Err(anyhow::Error::from(err)
