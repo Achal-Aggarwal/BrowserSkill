@@ -64,6 +64,20 @@ export function observesTarget(evidence: ObservationEvidence, target: EvidenceTa
   return evidence.nodes.some((node) => isTarget(node, target));
 }
 
+/** Specific keyboard recipients visible to the browser's accessibility tree.
+ * Document/iframe focus is not a reliable substitute for the actual recipient. */
+export function observedKeyboardTargets(evidence: ObservationEvidence): EvidenceTarget[] {
+  return evidence.nodes
+    .filter(
+      (node) =>
+        node.focused &&
+        node.backendNodeId !== undefined &&
+        !["body", "html", "iframe", "frame"].includes(node.tag) &&
+        node.role !== "RootWebArea",
+    )
+    .map((node) => ({ backendNodeId: node.backendNodeId!, frameId: node.frameId }));
+}
+
 const positioned = (node: VomNode) => ["absolute", "fixed"].includes(node.position);
 // Form state, value-bearing widgets and modal layers are never page activity.
 const protectedState = (node: VomNode) =>
@@ -239,14 +253,18 @@ function signature(
       learnedText.set(holder, set);
     }
   }
-  // Only progress values outside the protected region may be incidental.
+  // A semantic region may include both Pause and the timeline. Only a direct
+  // dependency on the timeline, its player, or a containing element makes its
+  // value exact; sharing the inferred region with a button does not.
   // Keep the original nodes intact: media controls cannot become learned text.
   const media = nodes.filter((node) => node.tag === "video" || node.tag === "audio");
   const forms = new Set(nodes.filter((node) => node.tag === "form").map((node) => node.id));
   const ignoredProgress = new Map<VomNode, VomNode>();
+  const explicitlyObserved = (node: VomNode) =>
+    !!anchor && (tree.within(node, anchor) || (node.domAncestorIds ?? []).includes(anchor.id));
   if (target)
     for (const node of nodes) {
-      if (inside(node) || node.value === undefined) continue;
+      if (explicitlyObserved(node) || node.value === undefined) continue;
       const owner = playbackProgressMedia(
         {
           ...node,
@@ -258,7 +276,7 @@ function signature(
           .filter((item) => item.frameId === node.frameId)
           .map((item) => ({ id: item.attrs?.id, node: item })),
       );
-      if (owner) ignoredProgress.set(node, owner.node);
+      if (owner && !explicitlyObserved(owner.node)) ignoredProgress.set(node, owner.node);
     }
   // Identity, structure, state and visibility of learned nodes remain checked.
   const facts = (node: VomNode, relax: boolean) => {
@@ -307,7 +325,7 @@ function signature(
  * whole page. With a target it never applies inside the target's own region,
  * as described in signature(). Form values, checked states and modal layers
  * stay exact everywhere except positively identified, non-submitted media
- * progress values outside the protected region of a scoped comparison.
+ * progress values outside the explicitly observed target subtree.
  */
 export function sameObservationEvidence(
   before: ObservationEvidence,

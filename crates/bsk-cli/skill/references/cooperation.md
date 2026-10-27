@@ -55,11 +55,14 @@ such as login or a captcha. Explicit user stop always ends the task.
 
 On continuously updating pages, declare the observed decision regions instead of repeatedly
 retrying a whole-page action. `press` honors dependencies even without a focus target; specify
-a target when the key must be delivered there. Untargeted keys reject a changed focus. A
-clearly labelled media timeline outside all declared regions may advance without revoking the
-action when it is unambiguously associated with a video/audio element. Submitted inputs, form members,
-ordinary sliders, and other business values remain protected; declaring the timeline itself
-as a dependency protects its value too. Unknown media controls retain the ordinary checks.
+a target when the key must be delivered there. Untargeted keys reject a changed focus and
+protect the actual focused region even if the declared dependencies are elsewhere. Unknown
+or ambiguous focus keeps whole-page checking; untargeted scripts also keep that strict check.
+A clearly labelled media timeline with an unambiguous video/audio association may advance
+beside a pause button, including in the same player region. Directly observing the timeline,
+its media element or a containing element keeps its value exact. Submitted inputs, form members,
+ordinary sliders and other business values remain protected. Media identity, child `<source>`
+declarations and the selected source stay exact. Unknown media controls retain ordinary checks.
 
 ## Scripts and file transfers
 

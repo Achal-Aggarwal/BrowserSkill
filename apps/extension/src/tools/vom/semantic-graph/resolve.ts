@@ -498,6 +498,9 @@ export function resolveSemanticGraph(
       ...(name ? { name } : {}),
       ...(value !== undefined ? { value } : {}),
       ...(checked !== undefined ? { checked } : {}),
+      ...(node.ax?.ignored !== true && axProperty(node.ax, "focused") === "true"
+        ? { focused: true }
+        : {}),
       ...(clean(node.dom?.formPlaceholder ?? attrs.placeholder)
         ? { placeholder: clean(node.dom?.formPlaceholder ?? attrs.placeholder) }
         : {}),

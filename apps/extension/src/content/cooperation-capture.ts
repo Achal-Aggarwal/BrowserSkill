@@ -43,9 +43,9 @@ export function attachCooperationCapture() {
   const keys = new Set<string>();
   const fields = new Map<Element, FieldChange>();
   const sampledValues = new WeakMap<Element, string>();
-  const ids = new WeakMap<Element, string>();
+  const ids = new WeakMap<object, string>();
   let nextId = 0;
-  const id = (element: Element) => {
+  const id = (element: object) => {
     let value = ids.get(element);
     if (!value) ids.set(element, (value = String(++nextId)));
     return value;
@@ -102,6 +102,20 @@ export function attachCooperationCapture() {
   };
   const observer = new MutationObserver(mutations);
   const roots = new Set<Document | ShadowRoot>();
+  // Page JS cannot see closed roots, but the extension can. Observation also
+  // traverses these roots, so source and focus guards must cover the same DOM.
+  const shadowRoot = (element: Element): ShadowRoot | null =>
+    element.shadowRoot ??
+    (element instanceof HTMLElement ? (chrome.dom?.openOrClosedShadowRoot(element) ?? null) : null);
+  const activeElement = () => {
+    let active = document.activeElement;
+    while (active) {
+      const nested = shadowRoot(active)?.activeElement;
+      if (!nested) break;
+      active = nested;
+    }
+    return active;
+  };
   const controls = function* (root: Document | ShadowRoot): Generator<Element> {
     if (!roots.has(root)) {
       observer.observe(root, {
@@ -115,14 +129,17 @@ export function attachCooperationCapture() {
     for (const element of root.querySelectorAll("*")) {
       if (overlay(element)) continue;
       if (element.matches("input,textarea,select,[contenteditable=true]")) yield element;
-      if (element.shadowRoot) yield* controls(element.shadowRoot);
+      const nested = shadowRoot(element);
+      if (nested) yield* controls(nested);
     }
   };
   const read = () => {
     mutations(observer.takeRecords());
-    let active = document.activeElement;
-    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    const active = activeElement();
     state.focus = active ? id(active) : undefined;
+    state.focusIsDocument =
+      (active === document.body || active === document.documentElement) &&
+      !active?.matches('[tabindex],[role],[contenteditable]:not([contenteditable="false"])');
     if ([...roots].some((root) => root instanceof ShadowRoot && !root.host.isConnected)) {
       observer.disconnect();
       roots.clear();
@@ -188,6 +205,36 @@ export function attachCooperationCapture() {
         });
     }
     for (const element of fields.keys()) if (!element.isConnected) fields.delete(element);
+    const media = [...roots].flatMap((root) =>
+      [...root.querySelectorAll<HTMLMediaElement>("video,audio")].map((element) => {
+        const stream = element.srcObject;
+        return {
+          id: id(element),
+          src: element.getAttribute("src"),
+          currentSrc: element.currentSrc,
+          srcObject: stream ? id(stream) : null,
+          tracks:
+            typeof MediaStream !== "undefined" && stream instanceof MediaStream
+              ? stream
+                  .getTracks()
+                  .map((track) => track.id)
+                  .sort()
+              : [],
+          sources: [...element.children]
+            .filter((child): child is HTMLSourceElement => child instanceof HTMLSourceElement)
+            .map((source) => ({
+              id: id(source),
+              src: source.src,
+              type: source.type,
+              media: source.media,
+            })),
+        };
+      }),
+    );
+    // currentSrc/srcObject may change without a DOM mutation. Keep the source
+    // evidence fresh even when the page's mutation counter did not advance.
+    if (state.media && JSON.stringify(state.media) !== JSON.stringify(media)) state.revision++;
+    state.media = media;
     state.busy = composing || pointer || keys.size > 0;
     state.fields = [...fields.values()];
     return { ...state };
@@ -257,8 +304,7 @@ export function attachCooperationCapture() {
       clearTimeout(focusTimer);
       focusTimer = setTimeout(() => {
         if (!enabled) return;
-        let active = document.activeElement;
-        while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+        const active = activeElement();
         if (state.editing) state.revision++;
         state.editing = state.editing && editable(active);
         composing = false;

@@ -39,6 +39,7 @@ async function fixture(options: { url?: string; sync?: boolean } = {}) {
   let now = 10000;
   let frame: FrameState = {
     document: "doc-a",
+    focusIsDocument: true,
     revision: 0,
     structure: 0,
     human: 0,
@@ -880,6 +881,60 @@ describe("shared-tab dispatch fences", () => {
       expect(f.native).not.toHaveBeenCalled();
     });
 
+    it.each([
+      "focused",
+      "unobserved",
+      "ambiguous",
+    ])("protects %s keyboard recipients independently of declared dependencies", async (focus) => {
+      live(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "form"],
+          [4, 2, "button", { name: "Pause" }],
+          [6, 1, "form"],
+          [7, 6, "span", { text: `$${100 + tick}` }],
+          [8, 6, "button", { name: "Buy", focused: focus !== "unobserved" }],
+          ...(focus === "ambiguous"
+            ? [[9, 1, "button", { name: "Other", focused: true }] as Spec]
+            : []),
+        ]),
+      );
+      refs();
+      const f = await fixture({ sync: false });
+      f.change({ focus: "buy", focusIsDocument: false }, false);
+      const synced = await f.command("sync");
+      expect(await run(f, synced.context_id, { key: "Enter", dependsOn: ["e4"] })).toMatchObject({
+        message: changed,
+        data: { effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("keeps untargeted scripts strict even when they declare unrelated dependencies", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      refs();
+      const f = await fixture();
+      f.change({ structure: 100 });
+      const result = await f.controller.run(
+        {
+          id: "script",
+          method: "tool.evaluate",
+          params: {
+            session_id: "shared",
+            tab_id: 7,
+            context_id: f.first.context_id,
+            expression: "buy()",
+            depends_on: ["e4"],
+          },
+        },
+        f.cdp,
+        f.abort.signal,
+        (runner) => runner.send(7, "Runtime.evaluate", { expression: "buy()" }),
+      );
+      expect(result).toMatchObject({ message: changed, data: { effect_state: "none" } });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
     it("does not let a refused context retry with newly learned tolerance", async () => {
       live((tick) => scene(`10:00:0${tick}`));
       const f = await fixture();
@@ -1026,6 +1081,13 @@ describe("shared-tab dispatch fences", () => {
       f.first.context_id,
       async (runner) => {
         await runner.send(7, "Page.navigate", { url: receipt.final_url });
+        // The completed navigation may replace media before the old document
+        // disappears; that is its effect, not grounds to revoke its receipt.
+        f.change({
+          media: [
+            { id: "next", src: "next.webm", currentSrc: "next.webm", srcObject: null, sources: [] },
+          ],
+        });
         f.controller.invalidate(7);
         f.change({ document: "doc-b" });
         return receipt;
@@ -2454,4 +2516,139 @@ it("refreshes timeline evidence on a delta when that value is an explicit decisi
   );
   expect(result).toEqual({});
   expect(f.native).toHaveBeenCalledOnce();
+});
+
+it("revokes actions on media source changes even without DOM revision changes", async () => {
+  const f = await fixture({ sync: false });
+  const media = {
+    id: "video",
+    src: null,
+    currentSrc: "one.webm",
+    srcObject: null,
+    sources: [{ id: "source", src: "one.webm", type: "video/webm", media: "" }],
+  };
+  f.change({ media: [media] }, false);
+  const synced = await f.command("sync");
+  // A browser source selection can change currentSrc without a DOM mutation.
+  const rev = f.readFrames.mock.results.at(-1)!.value;
+  const frames = await rev;
+  f.change(
+    { media: [{ ...media, currentSrc: "two.webm" }], revision: frames.get(0)!.revision },
+    false,
+  );
+  expect(await f.act(synced.context_id)).toMatchObject({
+    message: "The media source changed; synchronize and replan",
+    data: { effect_state: "none" },
+  });
+  expect(f.native).not.toHaveBeenCalled();
+});
+
+it("requires a fresh sync when a media source changes during observation", async () => {
+  const f = await fixture({ sync: false });
+  f.change(
+    {
+      media: [
+        { id: "video", src: "one.webm", currentSrc: "one.webm", srcObject: null, sources: [] },
+      ],
+    },
+    false,
+  );
+  vi.mocked(handleSnapshot).mockImplementationOnce(async () => {
+    f.change(
+      {
+        media: [
+          { id: "video", src: "two.webm", currentSrc: "two.webm", srcObject: null, sources: [] },
+        ],
+      },
+      false,
+    );
+    return { text: "Pause", ref_count: 1, tab_id: 7, truncated: false };
+  });
+  expect(await f.command("sync")).toMatchObject({
+    message: "Page changed while synchronizing; sync again after it settles",
+  });
+});
+
+it("does not revoke native input already started when that input switches the media", async () => {
+  const f = await fixture();
+  expect(
+    await f.act(f.first.context_id, async (runner) => {
+      await runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" });
+      f.change(
+        {
+          media: [
+            { id: "next", src: "two.webm", currentSrc: "two.webm", srcObject: null, sources: [] },
+          ],
+        },
+        false,
+      );
+      await runner.send(7, "Input.dispatchMouseEvent", { type: "mouseReleased" });
+      return { ok: true };
+    }),
+  ).toEqual({ ok: true });
+});
+
+it.each([
+  "focus",
+  "media",
+])("consumes a context refused for %s even if the page restores the old state", async (kind) => {
+  const f = await fixture();
+  f.change(
+    kind === "focus"
+      ? { focus: "other" }
+      : {
+          media: [
+            {
+              id: "video",
+              src: "other.webm",
+              currentSrc: "other.webm",
+              srcObject: null,
+              sources: [],
+            },
+          ],
+        },
+    false,
+  );
+  expect(await f.act(f.first.context_id, undefined, "tool.press")).toMatchObject({
+    data: { effect_state: "none" },
+  });
+  f.change({ focus: undefined, media: [] }, false);
+  expect(await f.act(f.first.context_id, undefined, "tool.press")).toMatchObject({
+    message: "This action requires the context returned by the latest cooperate sync",
+  });
+  expect(f.native).not.toHaveBeenCalled();
+});
+
+it.each([
+  "focus",
+  "media",
+])("refreshes semantic evidence when %s changes before a delta sync", async (kind) => {
+  vi.mocked(handleSnapshot).mockResolvedValue({
+    text: "Pause",
+    ref_count: 1,
+    tab_id: 7,
+    truncated: false,
+  });
+  const f = await fixture();
+  vi.mocked(handleSnapshot).mockClear();
+  f.change(
+    kind === "focus"
+      ? { focus: "pause", focusIsDocument: false }
+      : {
+          media: [{ id: "video", src: null, currentSrc: "two.webm", srcObject: null, sources: [] }],
+        },
+    false,
+  );
+  expect(await f.command("sync")).toHaveProperty("observation");
+  expect(handleSnapshot).toHaveBeenCalledOnce();
+});
+
+it("rejects a document that becomes a specific keyboard recipient without changing its identity", async () => {
+  const f = await fixture();
+  f.change({ focusIsDocument: false }, false);
+  expect(await f.act(f.first.context_id, undefined, "tool.press")).toMatchObject({
+    message: "The keyboard focus changed; synchronize before pressing a key",
+    data: { effect_state: "none" },
+  });
+  expect(f.native).not.toHaveBeenCalled();
 });

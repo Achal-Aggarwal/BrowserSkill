@@ -954,3 +954,34 @@ describe("semantic VOM graph", () => {
     expect(scene.nodes.find((node) => node.backendNodeId === 6)?.parentId).not.toBe(groups[0]?.id);
   });
 });
+
+it("retains browser focus on semantic nodes without trusting a DOM focused attribute", () => {
+  const scene = buildSemanticVomScene({
+    viewport: { width: 800, height: 600 },
+    rootFrameId: "main",
+    documents: [
+      document(
+        "main",
+        [
+          {
+            nodeId: "buy",
+            backendDOMNodeId: 2,
+            role: { type: "role", value: "button" },
+            name: { type: "computedString", value: "Buy" },
+            properties: [{ name: "focused", value: { value: true } }],
+          },
+          {
+            nodeId: "pause",
+            backendDOMNodeId: 3,
+            role: { type: "role", value: "button" },
+            name: { type: "computedString", value: "Pause" },
+            properties: [{ name: "focused", value: { value: false } }],
+          },
+        ],
+        [dom(2, null, "button"), dom(3, null, "button", { focused: "true" })],
+      ),
+    ],
+  });
+  expect(scene.nodes.find((node) => node.backendNodeId === 2)?.focused).toBe(true);
+  expect(scene.nodes.find((node) => node.backendNodeId === 3)?.focused).toBeUndefined();
+});

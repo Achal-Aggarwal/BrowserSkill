@@ -20,9 +20,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function collector() {
+function collector(shadowRoot?: (element: HTMLElement) => ShadowRoot | null) {
   let receive!: (message: unknown, sender: unknown, reply: (result: unknown) => void) => void;
   vi.stubGlobal("chrome", {
+    dom: shadowRoot ? { openOrClosedShadowRoot: shadowRoot } : undefined,
     runtime: {
       sendMessage: vi.fn(async () => {}),
       onMessage: {
@@ -452,4 +453,61 @@ it("reports programmatic focus changes even without a human event", () => {
   const current = read()!;
   expect(current.focus).not.toBe(first);
   expect(current.human).toBe(0);
+});
+
+it("records media sources independently of playback time, including runtime-only source changes", () => {
+  document.body.innerHTML = '<video><source src="one.webm" type="video/webm"></video>';
+  const video = document.querySelector("video")!;
+  const source = video.querySelector("source")!;
+  const read = collector();
+  const first = read()!;
+  video.currentTime = 1;
+  expect(read()!.media).toEqual(first.media);
+  source.src = "two.webm";
+  const changed = read()!;
+  expect(changed.media).not.toEqual(first.media);
+  expect(changed.revision).toBeGreaterThan(first.revision);
+  Object.defineProperty(video, "currentSrc", { configurable: true, value: "selected.webm" });
+  const selected = read()!;
+  expect(selected.media![0].currentSrc).toBe("selected.webm");
+  expect(selected.revision).toBeGreaterThan(changed.revision);
+  Object.defineProperty(video, "srcObject", { configurable: true, value: {} });
+  const stream = read()!;
+  expect(stream.media![0].srcObject).toEqual(expect.any(String));
+  Object.defineProperty(video, "srcObject", { configurable: true, value: {} });
+  expect(read()!.media![0].srcObject).not.toBe(stream.media![0].srcObject);
+});
+
+it("collects media and deep focus in open shadow roots", () => {
+  document.body.innerHTML = '<div id="host"></div>';
+  const root = document.querySelector("#host")!.attachShadow({ mode: "open" });
+  root.innerHTML = '<audio><source src="one.ogg"></audio><button>Pause</button>';
+  const read = collector();
+  expect(read()!.focusIsDocument).toBe(true);
+  root.querySelector<HTMLButtonElement>("button")!.focus();
+  const focused = read()!;
+  expect(focused.focusIsDocument).toBe(false);
+  expect(focused.media).toHaveLength(1);
+  root.querySelector("source")!.src = "two.ogg";
+  expect(read()!.media).not.toEqual(focused.media);
+});
+
+it("collects source and recipient changes inside closed shadow roots", () => {
+  document.body.innerHTML = '<div id="host"></div>';
+  const host = document.querySelector<HTMLElement>("#host")!;
+  const root = host.attachShadow({ mode: "closed" });
+  root.innerHTML =
+    '<video><source src="one.webm"></video><button>Pause</button><button>Buy</button>';
+  const read = collector((element) => (element === host ? root : null));
+  const buttons = root.querySelectorAll<HTMLButtonElement>("button");
+  buttons[0].focus();
+  const first = read()!;
+  expect(host.shadowRoot).toBeNull();
+  expect(first.media).toHaveLength(1);
+  buttons[1].focus();
+  root.querySelector("source")!.src = "two.webm";
+  const changed = read()!;
+  expect(changed.focus).not.toBe(first.focus);
+  expect(changed.media).not.toEqual(first.media);
+  expect(changed.revision).toBeGreaterThan(first.revision);
 });

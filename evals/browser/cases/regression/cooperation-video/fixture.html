@@ -24,10 +24,15 @@
   const variant = query.get('variant') || 'pixels';
   const interval = Number(query.get('interval') || 80);
   const video = document.querySelector('#preview');
+  if (query.get('shadow') === 'closed') {
+    const host = document.createElement('div');
+    video.before(host);
+    host.attachShadow({mode: 'closed'}).append(video);
+  }
   const dynamic = document.querySelector('#dynamic');
   const stats = { variant, keydowns: 0, clicks: 0, pauseCalls: 0, ticks: 0, presentedFrames: 0 };
   if (variant === 'text') dynamic.innerHTML = '<span id="clock">Playback tick 0</span>';
-  if (['range', 'submitted-range', 'form-range', 'combined'].includes(variant)) dynamic.innerHTML = '<label>Playback progress <input id="progress" type="range" min="0" max="10000" value="0"></label>';
+  if (['range', 'submitted-range', 'form-range', 'combined', 'source-range', 'src-range', 'same-region', 'same-region-field'].includes(variant)) dynamic.innerHTML = '<label>Playback progress <input id="progress" type="range" min="0" max="10000" value="0"></label>';
   if (variant === 'business-range') dynamic.innerHTML = '<label>Order amount <input id="progress" type="range" min="0" max="10000" value="0"></label>';
   if (variant === 'submitted-range') document.querySelector('#progress').name = 'order_amount';
   if (variant === 'form-range') {
@@ -36,10 +41,27 @@
   if (variant === 'combined') dynamic.insertAdjacentHTML('beforeend', '<label>Order total <input id="order" value="100"></label>');
   if (variant === 'field' || variant === 'focus') dynamic.innerHTML = '<label>Order total <input id="order" value="100"></label>';
   if (variant === 'cosmetic') dynamic.innerHTML = '<span id="cosmetic" class="phase-a">Preview information</span>';
-  if (variant === 'learned-price') dynamic.innerHTML = '<form aria-label="Purchase"><span id="price">Order total 100</span><button id="buy" type="button">Buy</button></form>';
+  if (['learned-price', 'focused-price'].includes(variant)) dynamic.innerHTML = '<form aria-label="Purchase"><span id="price">Order total 100</span><button id="buy" type="button">Buy</button></form>';
+  stats.purchases = 0;
+  if (variant === 'focused-price') {
+    document.querySelector('#buy').addEventListener('click', () => stats.purchases++);
+    document.querySelector('#buy').focus();
+  }
+  if (variant.startsWith('same-region')) {
+    const controls = document.querySelector('#controls');
+    const region = document.createElement('section');
+    region.id = 'player';
+    region.setAttribute('aria-label', 'Video player');
+    controls.before(region);
+    const timeline = document.querySelector('#progress');
+    region.append(video, document.querySelector('#pause'), timeline.closest('label') || timeline);
+    controls.remove();
+    if (variant === 'same-region-field') region.insertAdjacentHTML('beforeend', '<label>Order total <input id="order" value="100"></label>');
+  }
   const pause = () => { stats.pauseCalls++; video.pause(); };
   document.querySelector('#pause').addEventListener('click', () => { stats.clicks++; pause(); });
   document.addEventListener('keydown', event => {
+    if (variant === 'focused-price' && event.key === 'Enter') { stats.keydowns++; return; }
     if (event.code !== 'Space' && event.key !== ' ') return;
     event.preventDefault();
     stats.keydowns++;
@@ -50,10 +72,17 @@
       stats.ticks++;
       if (variant === 'text') document.querySelector('#clock').textContent = `Playback tick ${stats.ticks}`;
       if (document.querySelector('#progress')) document.querySelector('#progress').value = String(stats.ticks % 10000);
-      if (variant === 'field' || variant === 'combined') document.querySelector('#order').value = String(100 + stats.ticks);
+      if (['field', 'combined', 'same-region-field'].includes(variant)) document.querySelector('#order').value = String(100 + stats.ticks);
+      if (variant === 'body-recipient') { document.body.tabIndex = 0; document.body.setAttribute('role', 'button'); }
       if (variant === 'focus') document.querySelector('#order').focus();
       if (variant === 'cosmetic') document.querySelector('#cosmetic').className = stats.ticks % 2 ? 'phase-a' : 'phase-b';
-      if (variant === 'learned-price') document.querySelector('#price').firstChild.nodeValue = `Order total ${100 + stats.ticks}`;
+      if (['learned-price', 'focused-price'].includes(variant)) document.querySelector('#price').firstChild.nodeValue = `Order total ${100 + stats.ticks}`;
+      if (variant === 'source-range' || variant === 'source-only') {
+        video.querySelector('source').src = '/preview.webm?version=2';
+        video.load();
+        void video.play();
+      }
+      if (variant === 'src-range') { video.src = '/preview.webm?version=2'; void video.play(); }
   };
   window.startNoise = () => {
     if (!window.noiseTimer) window.noiseTimer = setInterval(window.tickNoise, interval);
@@ -70,6 +99,8 @@
     loop: video.loop,
     currentTime: video.currentTime,
     duration: video.duration,
+    currentSrc: video.currentSrc,
+    sourceSrc: video.querySelector('source')?.src,
     focused: document.activeElement?.id || document.activeElement?.tagName,
     clock: document.querySelector('#clock')?.textContent,
     progress: document.querySelector('#progress')?.value,
@@ -78,7 +109,8 @@
   });
   (async () => {
     // A bundled synthetic WebM avoids depending on live MediaRecorder scheduling.
-    video.src = '/preview.webm';
+    if (variant === 'source-range' || variant === 'source-only') video.innerHTML = '<source src="/preview.webm?version=1" type="video/webm">';
+    else video.src = '/preview.webm';
     const frame = () => { stats.presentedFrames++; video.requestVideoFrameCallback(frame); };
     video.requestVideoFrameCallback(frame);
     await video.play();

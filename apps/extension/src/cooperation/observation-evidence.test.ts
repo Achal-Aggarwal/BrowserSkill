@@ -416,3 +416,34 @@ it("never learns media values or relaxes an explicitly observed timeline", () =>
   ).toBe(false);
   expect(sameObservationEvidence(before, after, target, learned)).toBe(true);
 });
+
+it("allows incidental progress within the pause button's region, but keeps declared containers exact", () => {
+  const before = { nodes: mediaScene() };
+  before.nodes[1].tag = "section";
+  before.nodes[1].role = "region";
+  before.nodes[5].parentId = 2;
+  before.nodes[6].parentId = 2;
+  const after = structuredClone(before);
+  after.nodes[6].value = "2";
+  expect(sameObservationEvidence(before, after, target)).toBe(true);
+  expect(sameObservationEvidence(before, after, { backendNodeId: 7, frameId: "frame" })).toBe(
+    false,
+  );
+  expect(sameObservationEvidence(before, after, { backendNodeId: 2, frameId: "frame" })).toBe(
+    false,
+  );
+  expect(sameObservationEvidence(before, after)).toBe(false);
+  after.nodes[2].value = "new order";
+  expect(sameObservationEvidence(before, after, target)).toBe(false);
+});
+
+it("keeps explicitly declared DOM ancestors exact even when an AX parent differs", () => {
+  const before = { nodes: mediaScene() };
+  before.nodes.push(node(8, 1, "section", "Player"));
+  before.nodes[6].domAncestorIds = [8, 1];
+  const after = structuredClone(before);
+  after.nodes[6].value = "2";
+  expect(sameObservationEvidence(before, after, { backendNodeId: 8, frameId: "frame" })).toBe(
+    false,
+  );
+});

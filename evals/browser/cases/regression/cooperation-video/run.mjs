@@ -84,7 +84,7 @@ const poll = async (read, label, timeout = 15000) => {
 const html = await readFile(join(directory, "fixture.html"));
 const clip = await readFile(join(directory, "preview.webm"));
 const server = createServer((req, res) => {
-  if (req.url === "/preview.webm") {
+  if (req.url.startsWith("/preview.webm")) {
     res.setHeader("Content-Type", "video/webm");
     res.setHeader("Content-Length", clip.length);
     res.end(clip);
@@ -234,6 +234,150 @@ const cases = [
     dependencies: ["#progress"],
     allow: false,
   },
+  {
+    name: "focused_buy_price_change_unrelated_dependency",
+    variant: "focused-price",
+    key: "Enter",
+    target: false,
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+  },
+  {
+    name: "focused_buy_price_change_no_dependency",
+    variant: "focused-price",
+    key: "Enter",
+    target: false,
+    dependencies: false,
+    allow: false,
+    manual: true,
+  },
+  {
+    name: "focused_buy_price_change_explicit_target",
+    variant: "focused-price",
+    key: "Enter",
+    target: true,
+    targetSelector: "#buy",
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+  },
+  {
+    name: "child_source_changes_with_progress",
+    variant: "source-range",
+    target: true,
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+    source: true,
+  },
+  {
+    name: "child_source_changes_without_progress",
+    variant: "source-only",
+    target: true,
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+    source: true,
+  },
+  {
+    name: "video_src_changes_with_progress",
+    variant: "src-range",
+    target: true,
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+    source: true,
+  },
+  {
+    name: "progress_and_pause_in_same_player_region",
+    variant: "same-region",
+    target: true,
+    dependencies: ["#pause"],
+    allow: true,
+  },
+  {
+    name: "same_player_business_field_still_blocked",
+    variant: "same-region-field",
+    target: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "same_player_declared_timeline_still_blocked",
+    variant: "same-region",
+    target: true,
+    dependencies: ["#progress"],
+    allow: false,
+  },
+  {
+    name: "same_player_declared_container_still_blocked",
+    variant: "same-region",
+    target: true,
+    dependencies: ["#player"],
+    allow: false,
+  },
+  {
+    name: "focused_pause_in_same_player_allows_progress",
+    variant: "same-region",
+    target: false,
+    focusBefore: "#pause",
+    dependencies: ["#pause"],
+    allow: true,
+  },
+  {
+    name: "focused_timeline_still_exact",
+    variant: "same-region",
+    target: false,
+    focusBefore: "#progress",
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "focused_pause_after_delta_sync_allows_progress",
+    variant: "same-region",
+    target: false,
+    dependencies: ["#pause"],
+    allow: true,
+    focusAfterFirstSync: "#pause",
+  },
+  {
+    name: "closed_shadow_media_progress_is_incidental",
+    variant: "range",
+    closedShadow: true,
+    target: true,
+    dependencies: ["#pause"],
+    allow: true,
+    manual: true,
+  },
+  {
+    name: "closed_shadow_child_source_changes_with_progress",
+    variant: "source-range",
+    closedShadow: true,
+    target: true,
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+    source: true,
+  },
+  {
+    name: "closed_shadow_child_source_changes_without_progress",
+    variant: "source-only",
+    closedShadow: true,
+    target: true,
+    dependencies: ["#pause"],
+    allow: false,
+    manual: true,
+    source: true,
+  },
+  {
+    name: "body_becomes_specific_recipient_is_blocked",
+    variant: "body-recipient",
+    target: false,
+    dependencies: ["#pause"],
+    allow: false,
+    focus: true,
+  },
 ];
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -279,7 +423,7 @@ try {
         const scope = ["--session", session];
         let oracle;
         try {
-          const url = `${base}/?variant=${scenario.variant}&case=${scenario.name}&interval=${scenario.continuous ? 10 : 80}`;
+          const url = `${base}/?variant=${scenario.variant}&case=${scenario.name}&interval=${scenario.continuous ? 10 : 80}&shadow=${scenario.closedShadow ? "closed" : "none"}`;
           await ok(["navigate", url, ...scope]);
           const target = (await send("Target.getTargets")).targetInfos.find(
             (target) => target.url === url,
@@ -316,6 +460,10 @@ try {
             );
             throw error;
           }
+          if (scenario.focusBefore)
+            await read(
+              `document.querySelector(${JSON.stringify(scenario.focusBefore)}).focus(); true`,
+            );
           let learning;
           if (scenario.learn) {
             const initial = await ok(["cooperate", "sync", ...scope]);
@@ -359,27 +507,43 @@ try {
               sync = await ok(["cooperate", "sync", ...scope]);
             }
           }
+          if (scenario.focusAfterFirstSync) {
+            await read(
+              `document.querySelector(${JSON.stringify(scenario.focusAfterFirstSync)}).focus(); true`,
+            );
+            sync = await ok(["cooperate", "sync", ...scope]);
+            assert(sync.observation, "A new recipient must refresh semantic focus evidence");
+          }
           const before = await read("window.report()");
           assert.equal(before.paused, false);
           // Start page-origin updates after the observation, before the proposed input.
-          await read(scenario.learn ? "window.tickNoise(); true" : "window.startNoise(); true");
+          await read(
+            scenario.learn || scenario.manual
+              ? "window.tickNoise(); true"
+              : "window.startNoise(); true",
+          );
           await delay(320);
           const atAction = await read("window.report()");
           assert(
-            atAction.decodedFrames > before.decodedFrames,
-            "Video must actually decode frames",
+            scenario.source
+              ? atAction.presentedFrames > before.presentedFrames
+              : atAction.decodedFrames > before.decodedFrames,
+            "Video must actually decode frames, including after source reload",
           );
+          if (scenario.source) assert.notEqual(atAction.currentSrc, before.currentSrc);
           assert(atAction.ticks > before.ticks, "Page updates must run before the input");
           if (atAction.progress !== undefined) assert.notEqual(atAction.progress, before.progress);
           if (scenario.variant === "text") assert.notEqual(atAction.clock, before.clock);
-          if (["field", "combined"].includes(scenario.variant))
+          if (["field", "combined", "same-region-field"].includes(scenario.variant))
             assert.notEqual(atAction.order, before.order);
-          if (scenario.learn) assert.notEqual(atAction.price, before.price);
-          if (scenario.focus) assert.notEqual(atAction.focused, before.focused);
+          if (scenario.learn || scenario.variant === "focused-price")
+            assert.notEqual(atAction.price, before.price);
+          if (scenario.focus && scenario.variant !== "body-recipient")
+            assert.notEqual(atAction.focused, before.focused);
           const wait = await ok(["cooperate", "wait", ...scope, "--timeout-ms", "0"]);
           const action = await bsk([
             "press",
-            "Space",
+            scenario.key ?? "Space",
             ...scope,
             "--context",
             sync.context_id,
@@ -414,6 +578,7 @@ try {
             );
           }
           assert.equal(wait.ready, true, "No person should be holding control");
+          assert.equal(after.purchases, 0, "No simulated purchase may execute");
           if (scenario.allow) {
             assert.equal(action.exitCode, 0, JSON.stringify(action));
             assert.equal(after.keydowns, 1);
@@ -424,7 +589,9 @@ try {
               action.result.message,
               scenario.focus
                 ? "The keyboard focus changed; synchronize before pressing a key"
-                : "The action's observed content changed; synchronize and replan",
+                : scenario.source
+                  ? "The media source changed; synchronize and replan"
+                  : "The action's observed content changed; synchronize and replan",
             );
             assert.equal(action.result.data?.effect_state, "none");
             assert.equal(after.keydowns, 0);
