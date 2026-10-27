@@ -295,16 +295,20 @@ describe.skipIf(!process.env.BSK_VIDEO_CHROME || !process.env.BSK_VIDEO_BSK)(
             expect(pixels[1][0]).toBeLessThan(15);
             const screenshot = async (sessionId: string, name: string) => {
               if (!process.env.BSK_VIDEO_ARTIFACTS) return;
-              await mkdir(process.env.BSK_VIDEO_ARTIFACTS, { recursive: true });
-              const capture = await send<{ data: string }>(
-                "Page.captureScreenshot",
-                { format: "png" },
-                sessionId,
-              );
-              await writeFile(
-                path.join(process.env.BSK_VIDEO_ARTIFACTS, name),
-                Buffer.from(capture.data, "base64"),
-              );
+              try {
+                await mkdir(process.env.BSK_VIDEO_ARTIFACTS, { recursive: true });
+                const capture = await send<{ data: string }>(
+                  "Page.captureScreenshot",
+                  { format: "png" },
+                  sessionId,
+                );
+                await writeFile(
+                  path.join(process.env.BSK_VIDEO_ARTIFACTS, name),
+                  Buffer.from(capture.data, "base64"),
+                );
+              } catch (error) {
+                console.warn(`Could not save video screenshot ${name}:`, error);
+              }
             };
             await screenshot(preview.sessionId, "preview.png");
             // Exercise the real popup entry and its recording card.
