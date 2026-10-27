@@ -12,6 +12,8 @@ export interface FieldChange {
   id?: string;
   label: string;
   value: string;
+  /** A positively identified, non-submitted media timeline. */
+  kind?: "media_progress";
 }
 
 export interface HumanActivity {
@@ -32,6 +34,8 @@ export interface HumanActivity {
 
 export interface FrameState {
   document: string;
+  /** Collector-local identity of the deep active element in this document. */
+  focus?: string;
   revision: number;
   structure: number;
   human: number;

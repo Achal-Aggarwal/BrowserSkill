@@ -138,11 +138,18 @@ function quote(text: string): string {
   const points = Array.from(text);
   return JSON.stringify(points.length > 40 ? `${points.slice(0, 39).join("")}…` : text);
 }
-function sameFields(a: Frames, b: Frames): boolean {
+function sameFields(a: Frames, b: Frames, ignoreMediaProgress = false): boolean {
+  const stableFields = (frame: FrameState | undefined) =>
+    frame?.fields.map((field) =>
+      ignoreMediaProgress && field.kind === "media_progress"
+        ? { ...field, value: undefined }
+        : field,
+    );
   return (
     a.size === b.size &&
     [...a].every(
-      ([id, frame]) => JSON.stringify(frame.fields) === JSON.stringify(b.get(id)?.fields),
+      ([id, frame]) =>
+        JSON.stringify(stableFields(frame)) === JSON.stringify(stableFields(b.get(id))),
     )
   );
 }
@@ -608,7 +615,7 @@ export class CooperationController implements ControlAuthority {
           signal.aborted ||
           state.epoch !== epoch ||
           !sameFrames(before, after, "human") ||
-          !sameFields(before, after) ||
+          !sameFields(before, after, true) ||
           (delta && !sameFrames(before, after, "structure")) ||
           this.humanActive(state) ||
           state.held
@@ -1013,6 +1020,15 @@ export class CooperationController implements ControlAuthority {
       if (denied) return denied.message;
       if (!settledNavigation && state.unavailable)
         return "Page interaction coverage changed; wait and synchronize";
+      if (
+        req.method === "tool.press" &&
+        !nativeInputStarted &&
+        !params.ref &&
+        !params.selector &&
+        context &&
+        [...context.frames].some(([id, frame]) => frame.focus !== state.frames.get(id)?.focus)
+      )
+        return "The keyboard focus changed; synchronize before pressing a key";
       if (!settledNavigation && state.epoch !== epoch)
         return "The observed page or control state changed; synchronize";
     };
@@ -1053,7 +1069,7 @@ export class CooperationController implements ControlAuthority {
       // observations, whose region can be protected. A target-less key press or
       // script acts on whatever is focused, and a selector may resolve outside
       // the observation (for example inside aria-hidden content); both keep the
-      // exact whole-page check.
+      // exact whole-page check unless explicit dependencies narrow the decision.
       const anchored =
         actionTarget !== undefined &&
         observesTarget(context.evidence, actionTarget) &&
@@ -1066,10 +1082,10 @@ export class CooperationController implements ControlAuthority {
       // exact; sameObservationEvidence only relaxes broad layout around a target.
       const matches = (keys?: ReadonlySet<string>) => {
         if (evidenceTargets) {
-          const [own, ...dependencies] = evidenceTargets;
           return (
-            sameObservationEvidence(context.evidence!, evidence!, own, keys) &&
-            dependencies.every((dependency) =>
+            (!actionTarget ||
+              sameObservationEvidence(context.evidence!, evidence!, actionTarget, keys)) &&
+            evidenceTargets.every((dependency) =>
               sameObservationEvidence(context.evidence!, evidence!, dependency),
             )
           );
@@ -1113,7 +1129,7 @@ export class CooperationController implements ControlAuthority {
         ];
         const [first] = reported;
         throw new Error(
-          (revoked = `Page text changed by itself (${quote(first.before)} → ${quote(first.after)}${reported.length > 1 ? ` and ${reported.length - 1} more` : ""}); synchronize and replan. After that sync, further changes to that text no longer block actions on a ref or selector elsewhere. They still block actions whose target shares a form, list, dialog, panel or other container with it, and actions without a ref or selector. If the decision relies on that text, declare it with --depends-on to keep it exact`),
+          (revoked = `Page text changed by itself (${quote(first.before)} → ${quote(first.after)}${reported.length > 1 ? ` and ${reported.length - 1} more` : ""}); synchronize and replan. After that sync, further changes to that text no longer block actions on a ref or selector elsewhere. They still block actions whose target shares a form, list, dialog, panel or other container with it, and actions without a ref, selector or explicit dependencies. If the decision relies on that text, declare it with --depends-on to keep it exact`),
         );
       }
       throw new Error((revoked = "The action's observed content changed; synchronize and replan"));
@@ -1138,7 +1154,6 @@ export class CooperationController implements ControlAuthority {
         );
         if (isRpcError(resolved)) return resolved;
         actionTarget = resolved;
-        if (params.depends_on?.length) evidenceTargets = [resolved];
       }
       if (params.depends_on !== undefined) {
         if (
@@ -1152,7 +1167,10 @@ export class CooperationController implements ControlAuthority {
             code: "invalid_params",
             message: "depends_on requires at most 16 observed refs/selectors",
           };
-        if (evidenceTargets)
+        if (params.depends_on.length) {
+          // Dependencies constrain the decision even when a key has no target.
+          // Keep them separate from the target so learned text never relaxes them.
+          evidenceTargets = [];
           for (const dependency of params.depends_on) {
             const resolved = await resolveActionTarget(
               guardedRunner(cdp),
@@ -1164,6 +1182,7 @@ export class CooperationController implements ControlAuthority {
             if (isRpcError(resolved)) return resolved;
             evidenceTargets.push(resolved);
           }
+        }
       }
       await verifyEvidence();
       state.context = undefined; // Consume before execution, including failed/unknown replies.

@@ -298,3 +298,121 @@ describe("learned text around a target inside <main> or without a region", () =>
     expect(allowed(flat, 2, 3)).toBe(true);
   });
 });
+
+const mediaScene = () => [
+  ...scene(),
+  { ...node(6, 1, "Video", "Preview"), tag: "video", attrs: { id: "preview", src: "clip.webm" } },
+  {
+    ...node(7, 1, "slider", "Playback progress"),
+    tag: "input",
+    value: "1",
+    attrs: { type: "range" },
+  },
+];
+
+it("tolerates only the value of an outside media timeline for a declared scope", () => {
+  const before = mediaScene();
+  const after = structuredClone(before);
+  after[6].value = "2";
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, target)).toBe(true);
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after })).toBe(false);
+  expect(
+    sameObservationEvidence(
+      { nodes: before },
+      { nodes: after },
+      { backendNodeId: 7, frameId: "frame" },
+    ),
+  ).toBe(false);
+});
+
+it.each([
+  "business slider",
+  "business text",
+  "named input",
+  "form member",
+  "external form",
+  "missing media",
+  "ambiguous media",
+  "different frame",
+  "wrong relation",
+])("protects %s despite video playback", (kind) => {
+  const before = mediaScene();
+  const progress = before[6];
+  if (kind === "business slider") progress.name = "Order amount";
+  if (kind === "business text") {
+    progress.role = "textbox";
+    progress.attrs = { type: "text" };
+  }
+  if (kind === "named input") progress.attrs!.name = "amount";
+  if (kind === "form member") {
+    before.push(node(8, 1, "form", "Order"));
+    progress.domAncestorIds = [8, 1];
+  }
+  if (kind === "external form") progress.attrs!.form = "order";
+  if (kind === "missing media") before[5].tag = "div";
+  if (kind === "ambiguous media") before.push({ ...node(8, 1, "Video"), tag: "video" });
+  if (kind === "different frame") before[5].frameId = "other";
+  if (kind === "wrong relation") progress.attrs!["aria-controls"] = "order";
+  const after = structuredClone(before);
+  after[6].value = "2";
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, target)).toBe(false);
+});
+
+it("supports an explicit media relation when more than one player exists", () => {
+  const before = mediaScene();
+  before.push({ ...node(8, 1, "Video"), tag: "video", attrs: { id: "other" } });
+  before[6].attrs!["aria-controls"] = "preview";
+  const after = structuredClone(before);
+  after[6].value = "2";
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, target)).toBe(true);
+});
+
+it.each([
+  "identity",
+  "label",
+  "disabled",
+  "removed",
+  "media identity",
+  "media source",
+  "business value",
+])("retains %s evidence while ignoring timeline ticks", (kind) => {
+  const before = mediaScene();
+  before.push({ ...node(8, 1, "textbox", "Order total"), value: "100" });
+  const after = structuredClone(before);
+  after[6].value = "2";
+  if (kind === "identity") after[6].backendNodeId = 70;
+  if (kind === "label") after[6].name = "Order amount";
+  if (kind === "disabled") after[6].disabled = true;
+  if (kind === "removed") after.splice(6, 1);
+  if (kind === "media identity") after[5].backendNodeId = 60;
+  if (kind === "media source") after[5].attrs!.src = "other.webm";
+  if (kind === "business value") after[7].value = "200";
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, target)).toBe(false);
+});
+
+it.each([
+  "min",
+  "max",
+  "step",
+  "aria-valuemin",
+  "aria-valuemax",
+])("protects timeline %s while its value advances", (attribute) => {
+  const before = mediaScene();
+  const after = structuredClone(before);
+  after[6].value = "2";
+  after[6].attrs![attribute] = "10";
+  expect(sameObservationEvidence({ nodes: before }, { nodes: after }, target)).toBe(false);
+});
+
+it("never learns media values or relaxes an explicitly observed timeline", () => {
+  const before = { nodes: mediaScene() };
+  const after = structuredClone(before);
+  after.nodes[6].value = "2";
+  const learned = new Set(["frame:7"]);
+  expect(contentChanges(before, after)).toBeUndefined();
+  expect(sameObservationEvidence(before, after, undefined, learned)).toBe(false);
+  expect(
+    sameObservationEvidence(before, after, { backendNodeId: 7, frameId: "frame" }, learned),
+  ).toBe(false);
+  expect(sameObservationEvidence(before, after, target, learned)).toBe(true);
+});

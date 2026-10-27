@@ -1,3 +1,4 @@
+import { playbackProgressMedia } from "@/cooperation/media-progress";
 import {
   COOPERATION_ARM,
   COOPERATION_DISABLE,
@@ -119,12 +120,16 @@ export function attachCooperationCapture() {
   };
   const read = () => {
     mutations(observer.takeRecords());
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    state.focus = active ? id(active) : undefined;
     if ([...roots].some((root) => root instanceof ShadowRoot && !root.host.isConnected)) {
       observer.disconnect();
       roots.clear();
     }
     for (const element of fields.keys()) if (!element.isConnected) fields.delete(element);
     let fieldCount = 0;
+    const mediaByRoot = new Map<Document | ShadowRoot, { id: string }[]>();
     state.fieldsComplete = true;
     for (const target of controls(document)) {
       if (
@@ -140,6 +145,34 @@ export function attachCooperationCapture() {
             : (target.textContent ?? "");
       const value = fullValue.slice(0, 500);
       const name = label(target);
+      let mediaProgress = false;
+      if (target instanceof HTMLInputElement && target.type === "range") {
+        const root = target.getRootNode() as Document | ShadowRoot;
+        let media = mediaByRoot.get(root);
+        if (!media) {
+          media = [...root.querySelectorAll("video,audio")].map((element) => ({ id: element.id }));
+          mediaByRoot.set(root, media);
+        }
+        const labelledBy = (target.getAttribute("aria-labelledby") ?? "")
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((id) => root.getElementById(id)?.textContent ?? "")
+          .join(" ");
+        const labels = [...new Set(target.labels ?? [])]
+          .map((label) => label.textContent)
+          .join(" ");
+        mediaProgress = !!playbackProgressMedia(
+          {
+            tag: "input",
+            name: target.getAttribute("aria-label") || labelledBy || labels,
+            attrs: Object.fromEntries(
+              [...target.attributes].map((attr) => [attr.name, attr.value]),
+            ),
+            inForm: target.form !== null,
+          },
+          media,
+        );
+      }
       fieldCount++;
       if (fieldCount > MAX_CHANGES || fullValue.length > 500) state.fieldsComplete = false;
       const sampled = sampledValues.get(target);
@@ -147,7 +180,12 @@ export function attachCooperationCapture() {
       sampledValues.set(target, fullValue);
       const old = fields.get(target);
       if (fields.size < MAX_CHANGES || old)
-        fields.set(target, { id: id(target), label: name, value });
+        fields.set(target, {
+          id: id(target),
+          label: name,
+          value,
+          ...(mediaProgress ? { kind: "media_progress" as const } : {}),
+        });
     }
     for (const element of fields.keys()) if (!element.isConnected) fields.delete(element);
     state.busy = composing || pointer || keys.size > 0;

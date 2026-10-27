@@ -40,7 +40,8 @@ set is uncertain, omit it and retain whole-page checking. Text that changes by i
 sync and action (a clock, a counter) is reported once with the before/after text. After you sync
 and replan, further changes to that text no longer block actions on a ref or selector unless it
 shares a form, list, dialog, panel or other container with the target. Actions without a ref or
-selector, such as a bare key press, always check the whole page exactly. Added, removed or
+selector never learn incidental text; a bare key press checks the whole page exactly unless
+explicit dependencies narrow its decision regions. Added, removed or
 re-rendered elements and text without its own accessible node (such as `aria-hidden` content)
 keep blocking. If the decision relies on such text, declare it with `--depends-on`, which stays
 exact. Dependencies must come from the current observation; they do not authorize replaying an
@@ -51,6 +52,14 @@ dragging keep the person's lease until they finish.
 A regular coordination result is not a failed browser attempt. Use wait then sync, and choose
 the next action from the actual result. Use request-help only for an actual human requirement
 such as login or a captcha. Explicit user stop always ends the task.
+
+On continuously updating pages, declare the observed decision regions instead of repeatedly
+retrying a whole-page action. `press` honors dependencies even without a focus target; specify
+a target when the key must be delivered there. Untargeted keys reject a changed focus. A
+clearly labelled media timeline outside all declared regions may advance without revoking the
+action when it is unambiguously associated with a video/audio element. Submitted inputs, form members,
+ordinary sliders, and other business values remain protected; declaring the timeline itself
+as a dependency protects its value too. Unknown media controls retain the ordinary checks.
 
 ## Scripts and file transfers
 

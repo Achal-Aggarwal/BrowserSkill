@@ -404,3 +404,52 @@ it("announces renderer readiness once after the collection listener exists", () 
   expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ kind: COOPERATION_READY });
   expect(read()).toHaveProperty("document");
 });
+
+it("classifies a non-submitted media timeline without masking business fields", () => {
+  document.body.innerHTML =
+    '<video id="preview"></video><label>Playback progress<input id="timeline" type="range" value="1"></label><input aria-label="Order total" value="100"><input type="range" aria-label="Order amount" value="10">';
+  const read = collector();
+  const before = read()!;
+  expect(before.fields[0]).toMatchObject({ value: "1", kind: "media_progress" });
+  expect(before.fields.slice(1).every((field) => field.kind === undefined)).toBe(true);
+  const progress = document.querySelector<HTMLInputElement>("#timeline")!;
+  progress.value = "2";
+  expect(read()!.fields[0]).toMatchObject({ value: "2", kind: "media_progress" });
+  progress.name = "order_amount";
+  expect(read()!.fields[0].kind).toBeUndefined();
+});
+
+it.each([
+  "form",
+  "external",
+  "ambiguous",
+  "missing",
+])("does not classify a %s timeline as incidental", (kind) => {
+  document.body.innerHTML =
+    '<video id="preview"></video><input id="timeline" type="range" aria-label="Playback progress">';
+  const timeline = document.querySelector<HTMLInputElement>("#timeline")!;
+  if (kind === "form") {
+    const form = document.createElement("form");
+    document.body.append(form);
+    form.append(timeline);
+  }
+  if (kind === "external") {
+    const form = document.createElement("form");
+    form.id = "order";
+    document.body.append(form);
+    timeline.setAttribute("form", "order");
+  }
+  if (kind === "ambiguous") document.body.append(document.createElement("video"));
+  if (kind === "missing") document.querySelector("video")!.remove();
+  expect(collector()()!.fields[0].kind).toBeUndefined();
+});
+
+it("reports programmatic focus changes even without a human event", () => {
+  document.body.innerHTML = '<button id="pause">Pause</button><input id="order">';
+  const read = collector();
+  const first = read()!.focus;
+  document.querySelector<HTMLInputElement>("#order")!.focus();
+  const current = read()!;
+  expect(current.focus).not.toBe(first);
+  expect(current.human).toBe(0);
+});

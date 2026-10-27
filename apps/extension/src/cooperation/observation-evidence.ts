@@ -1,4 +1,5 @@
 import type { VomNode, VomScene } from "@browser-skill/vom";
+import { playbackProgressMedia } from "./media-progress";
 
 /** Reuse the observation's semantic nodes. CSS classes and pixel positions are
  * deliberately absent; the interaction layer rechecks the live hit target. */
@@ -33,6 +34,12 @@ const semanticAttributes = [
   "aria-pressed",
   "aria-disabled",
   "aria-hidden",
+  "aria-controls",
+  "aria-valuemin",
+  "aria-valuemax",
+  "min",
+  "max",
+  "step",
   "readonly",
   "required",
 ];
@@ -232,6 +239,27 @@ function signature(
       learnedText.set(holder, set);
     }
   }
+  // Only progress values outside the protected region may be incidental.
+  // Keep the original nodes intact: media controls cannot become learned text.
+  const media = nodes.filter((node) => node.tag === "video" || node.tag === "audio");
+  const forms = new Set(nodes.filter((node) => node.tag === "form").map((node) => node.id));
+  const ignoredProgress = new Map<VomNode, VomNode>();
+  if (target)
+    for (const node of nodes) {
+      if (inside(node) || node.value === undefined) continue;
+      const owner = playbackProgressMedia(
+        {
+          ...node,
+          inForm:
+            tree.ancestors(node).some((ancestor) => ancestor.tag === "form") ||
+            (node.domAncestorIds ?? []).some((id) => forms.has(id)),
+        },
+        media
+          .filter((item) => item.frameId === node.frameId)
+          .map((item) => ({ id: item.attrs?.id, node: item })),
+      );
+      if (owner) ignoredProgress.set(node, owner.node);
+    }
   // Identity, structure, state and visibility of learned nodes remain checked.
   const facts = (node: VomNode, relax: boolean) => {
     const tolerate = relax && tolerated(node);
@@ -246,7 +274,7 @@ function signature(
           ? withoutLearned(node.name, learnedText.get(node))
           : node.name,
       tolerate ? undefined : node.text,
-      node.value,
+      ignoredProgress.has(node) ? undefined : node.value,
       node.checked,
       node.disabled,
       node.inert,
@@ -266,6 +294,8 @@ function signature(
       .filter((node) => node.value !== undefined || node.checked !== undefined)
       .map((node) => facts(node, false)),
     nodes.filter((node) => node.modal).map((node) => facts(node, false)),
+    // Replacing the player or its source still invalidates the observation.
+    [...new Set(ignoredProgress.values())].map((node) => [...facts(node, false), node.attrs?.src]),
   ]);
 }
 
@@ -276,7 +306,8 @@ function signature(
  * wherever it appears as whole words. Without a target this applies to the
  * whole page. With a target it never applies inside the target's own region,
  * as described in signature(). Form values, checked states and modal layers
- * stay exact everywhere.
+ * stay exact everywhere except positively identified, non-submitted media
+ * progress values outside the protected region of a scoped comparison.
  */
 export function sameObservationEvidence(
   before: ObservationEvidence,
