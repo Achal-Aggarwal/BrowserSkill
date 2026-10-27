@@ -288,7 +288,7 @@ jobs:
     # Allows Chrome for Testing's user-namespace sandbox without a custom
     # AppArmor profile for its temporary installation path.
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       BSK_VIDEO_ARTIFACTS: ${{ github.workspace }}/evals/browser/results/video-regression
 

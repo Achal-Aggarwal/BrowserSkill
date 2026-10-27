@@ -44,7 +44,7 @@ globalThis.runEncoder = async (crash = false, width = 320, height = 180, quality
 
 const player = `
 import { VideoArtifactStore } from '@/video/store';
-import { readVideoPixels } from '@/video/playback-fixture';
+import { readVideoPixels, videoFrameTargets } from '@/video/playback-fixture';
 globalThis.exportVideo=async(id)=>{
   const bytes=new Uint8Array(await (await new VideoArtifactStore().file(id)).arrayBuffer());
   let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
@@ -55,7 +55,12 @@ globalThis.inspectVideo=async(id)=>{
   const video=document.createElement('video');video.muted=true;document.body.append(video);
   const url=URL.createObjectURL(file);video.src=url;
   await new Promise((resolve,reject)=>{video.onloadeddata=resolve;video.onerror=()=>reject(Error('MP4 playback failed'));});
-  const pixels=await readVideoPixels(video,[.2,video.duration-.2]);
+  // Exercise a no-op seek at the initial position, repeated targets and two
+  // requested times within one sparse frame in the real browser too.
+  const targets=await videoFrameTargets(file,[0,0,.2,.2,video.duration-.2]);
+  const samples=await readVideoPixels(video,targets);
+  if(JSON.stringify(samples[0])!==JSON.stringify(samples[1])||JSON.stringify(samples[2])!==JSON.stringify(samples[3]))throw Error('Repeated frame samples disagree');
+  const pixels=[samples[2],samples[4]];
   const result={duration:video.duration,width:video.videoWidth,height:video.videoHeight,pixels};
   URL.revokeObjectURL(url);video.remove();return result;
 };
@@ -172,11 +177,16 @@ describe.skipIf(!process.env.BSK_VIDEO_CHROME)("video encoder browser regression
           const version = await send("Browser.getVersion");
           const inspect = async (id: string, name: string, recording: unknown) => {
             if (process.env.BSK_VIDEO_ARTIFACTS) {
-              const data = await evaluate<string>(
-                attached.sessionId,
-                `exportVideo(${JSON.stringify(id)})`,
-              );
-              await saveVideoEvidence(name, { version, recording }, Buffer.from(data, "base64"));
+              // Persist the file and initial metadata before playback; update
+              // the JSON below only after sampling succeeds. Failed playback
+              // must still leave the original MP4 and recording details.
+              await saveVideoEvidence(name, { version, recording }, async () => {
+                const data = await evaluate<string>(
+                  attached.sessionId,
+                  `exportVideo(${JSON.stringify(id)})`,
+                );
+                return Buffer.from(data, "base64");
+              });
             }
             const playback = await evaluate<{
               duration: number;
