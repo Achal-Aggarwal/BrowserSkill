@@ -1212,8 +1212,7 @@ async fn session_window_closed_event_purges_session() {
             None,
         )
         .await
-        .err()
-        .expect("the dead session must reject dispatches")
+        .expect_err("the dead session must reject dispatches")
         .into_rpc();
     assert_eq!(err.code, bsk_protocol::ErrorCode::NotFound);
     assert_eq!(
@@ -1260,8 +1259,7 @@ async fn browser_disconnect_purges_sessions() {
             None,
         )
         .await
-        .err()
-        .expect("the dead session must reject dispatches")
+        .expect_err("the dead session must reject dispatches")
         .into_rpc();
     assert_eq!(err.code, bsk_protocol::ErrorCode::NotFound);
     assert_eq!(
@@ -1435,8 +1433,7 @@ async fn reconnect_with_same_instance_id_purges_stale_sessions_but_keeps_new_bro
             None,
         )
         .await
-        .err()
-        .expect("the dead session must reject dispatches")
+        .expect_err("the dead session must reject dispatches")
         .into_rpc();
     assert_eq!(err.code, bsk_protocol::ErrorCode::NotFound);
     assert_eq!(
