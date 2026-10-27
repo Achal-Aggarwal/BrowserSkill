@@ -499,6 +499,440 @@ describe("shared-tab dispatch fences", () => {
     }
     expect(resolveActionTarget).toHaveBeenCalled();
   });
+  describe("self-changing page content", () => {
+    // A clock (node 5) ticks on every observation; the action targets node 4.
+    const scene = (clock: string, button = "Continue", extra = false): VomScene => ({
+      viewport: { width: 800, height: 600 },
+      nodes: [
+        { id: 1, parentId: null, tag: "main", name: "", role: "main" },
+        { id: 2, parentId: 1, tag: "form", name: "", role: "form" },
+        { id: 4, parentId: 2, tag: "button", name: button, role: "button" },
+        { id: 5, parentId: 1, tag: "span", name: "", text: clock },
+        ...(extra ? [{ id: 6, parentId: 1, tag: "p", name: "", text: "Sold out" }] : []),
+      ].map((node) => ({
+        ...node,
+        backendNodeId: node.id,
+        frameId: "frame",
+        rect: { x: 0, y: 0, w: 20, h: 20 },
+        paintOrder: 1,
+        position: "static",
+        pointerEvents: "auto",
+      })),
+    });
+    const live = (next: (tick: number) => VomScene) => {
+      let tick = 0;
+      vi.mocked(handleSnapshot).mockImplementation(async (_m, _p, deps) => {
+        deps!.onScene?.(next(tick++));
+        return { text: "Continue", ref_count: 1, tab_id: 7, truncated: false };
+      });
+      vi.mocked(captureVomObservation).mockImplementation(async (_c, _t, _u, options) => {
+        options?.onScene?.(next(tick++));
+        return {} as Awaited<ReturnType<typeof captureVomObservation>>;
+      });
+    };
+    const act = (f: Awaited<ReturnType<typeof fixture>>, context: string, dependsOn?: string[]) =>
+      f.controller.run(
+        {
+          id: "live",
+          method: "tool.click",
+          params: {
+            session_id: "shared",
+            tab_id: 7,
+            context_id: context,
+            ref: "e4",
+            ...(dependsOn ? { depends_on: dependsOn } : {}),
+          },
+        },
+        f.cdp,
+        f.abort.signal,
+        (runner) => runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" }),
+      ) as Promise<Record<string, any>>;
+    // Every mutation of the live region also bumps the structure counter.
+    const cycle = async (
+      f: Awaited<ReturnType<typeof fixture>>,
+      context: string,
+      deps?: string[],
+    ) => {
+      f.change({ structure: f.controller.view(7)!.revision + 100 });
+      return act(f, context, deps);
+    };
+    afterEach(() => {
+      vi.mocked(handleSnapshot).mockReset();
+      vi.mocked(captureVomObservation).mockReset();
+      vi.mocked(resolveActionTarget).mockReset();
+    });
+    type Spec = [id: number, parent: number | null, role: string, extra?: Record<string, unknown>];
+    // Builds a scene from compact node specs; `tick` drives the live text.
+    const page = (specs: (tick: number) => Spec[]) => (tick: number) => ({
+      viewport: { width: 800, height: 600 },
+      nodes: specs(tick).map(([id, parentId, role, extra]) => ({
+        id,
+        parentId,
+        backendNodeId: id,
+        frameId: "frame",
+        tag: role,
+        role,
+        name: "",
+        rect: { x: 0, y: 0, w: 20, h: 20 },
+        paintOrder: 1,
+        position: "static",
+        pointerEvents: "auto",
+        ...extra,
+      })),
+    });
+    // Resolves "eN" refs to backend node N.
+    const refs = () =>
+      vi.mocked(resolveActionTarget).mockImplementation(
+        async (_c, _s, _t, params) =>
+          ({
+            backendNodeId: Number((params as { ref?: string }).ref?.replace(/^@?e/, "")),
+            frameId: "frame",
+            cdpTarget: { tabId: 7 },
+            tab: { tabId: 7 },
+          }) as Awaited<ReturnType<typeof resolveActionTarget>>,
+      );
+    const run = (
+      f: Awaited<ReturnType<typeof fixture>>,
+      context: string,
+      action: { ref?: string; dependsOn?: string[]; key?: string },
+    ) => {
+      f.change({ structure: f.controller.view(7)!.revision + 100 });
+      return f.controller.run(
+        {
+          id: "live",
+          method: action.key ? "tool.press" : "tool.click",
+          params: {
+            session_id: "shared",
+            tab_id: 7,
+            context_id: context,
+            ...(action.ref ? { ref: action.ref } : {}),
+            ...(action.key ? { key: action.key } : {}),
+            ...(action.dependsOn ? { depends_on: action.dependsOn } : {}),
+          },
+        },
+        f.cdp,
+        f.abort.signal,
+        (runner) => runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" }),
+      ) as Promise<Record<string, any>>;
+    };
+    const changed = "The action's observed content changed; synchronize and replan";
+    /** One learning refusal, then `attempts` fresh-sync actions all succeed. */
+    const learnsThenActs = async (
+      build: (tick: number) => VomScene,
+      action: { ref?: string; dependsOn?: string[] },
+      attempts = 2,
+    ) => {
+      live(build);
+      refs();
+      const f = await fixture();
+      expect((await run(f, f.first.context_id, action)).message).toContain("changed by itself");
+      for (let attempt = 0; attempt < attempts; attempt++)
+        expect(await run(f, (await f.command("sync")).context_id, action)).toEqual({});
+      expect(f.native).toHaveBeenCalledTimes(attempts);
+    };
+    /** Every fresh-sync action keeps being refused without dispatching input. */
+    const keepsRefusing = async (
+      build: (tick: number) => VomScene,
+      action: { ref?: string; dependsOn?: string[]; key?: string },
+    ) => {
+      live(build);
+      refs();
+      const f = await fixture();
+      for (let attempt = 0, context = f.first.context_id; attempt < 3; attempt++) {
+        expect(await run(f, context, action)).toMatchObject({
+          data: { reason: "cooperation_sync_required", effect_state: "none" },
+        });
+        context = (await f.command("sync")).context_id;
+      }
+      expect(f.native).not.toHaveBeenCalled();
+    };
+    const clock = (tick: number) => `10:00:0${tick}`;
+
+    it("tolerates a clock beside a button directly inside <main>", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("tolerates a clock on a page without any landmark", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "body"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("tolerates a clock that mirrors its time into aria-label and title", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "body"],
+          [2, 1, "form"],
+          [3, 2, "button", { name: "Continue" }],
+          [
+            4,
+            1,
+            "timer",
+            { text: clock(tick), attrs: { "aria-label": clock(tick), title: clock(tick) } },
+          ],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("lets declared dependencies coexist with a clock in the target's <main>", () =>
+      learnsThenActs(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+          [5, null, "form"],
+          [6, 5, "textbox", { name: "Quantity", value: "1" }],
+        ]),
+        { ref: "e3", dependsOn: ["e6"] },
+      ));
+
+    it("never learns text that changed alongside human input", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      const f = await fixture();
+      // The person acts on the page while the clock ticks.
+      f.change({ human: 1, structure: 50 });
+      expect(await act(f, f.first.context_id)).toMatchObject({
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+      // Nothing was learned: the next tick is reported as new page activity.
+      const synced = await f.command("sync");
+      expect((await cycle(f, synced.context_id)).message).toContain("changed by itself");
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("never tolerates key presses or other actions without a resolved target", () =>
+      keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { key: "Enter" },
+      ));
+
+    it("keeps a learned node exact for a later key press on its form", async () => {
+      // Clicking Continue in form A learns the price in form B; Enter on the
+      // focused form B must still require the price observed at sync.
+      live(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "form", { name: "A" }],
+          [4, 2, "button", { name: "Continue" }],
+          [6, 1, "form", { name: "B" }],
+          [7, 6, "span", { text: `$${100 + tick}` }],
+          [8, 6, "button", { name: "Pay" }],
+        ]),
+      );
+      refs();
+      const f = await fixture();
+      expect((await run(f, f.first.context_id, { ref: "e4" })).message).toContain(
+        "changed by itself",
+      );
+      expect(await run(f, (await f.command("sync")).context_id, { key: "Enter" })).toMatchObject({
+        message: changed,
+        data: { effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("never tolerates changes to the target or its contents", async () => {
+      await keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: `Buy for $${100 + tick}` }],
+          [4, 1, "span", { text: clock(tick) }],
+        ]),
+        { ref: "e3" },
+      );
+      await keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [3, 1, "button", { name: "Buy" }],
+          [4, 3, "span", { text: `$${100 + tick}` }],
+        ]),
+        { ref: "e3" },
+      );
+    });
+
+    it("keeps a countdown inside the target's own form exact", () =>
+      keepsRefusing(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "form"],
+          [3, 2, "button", { name: "Pay" }],
+          [4, 2, "span", { text: `Expires in 0:0${9 - tick}` }],
+        ]),
+        { ref: "e3" },
+      ));
+
+    it("keeps a learned node exact when it shares a card with a later target", async () => {
+      // The price sits in an <article> card next to its Buy button.
+      live(
+        page((tick) => [
+          [1, null, "main"],
+          [2, 1, "button", { name: "Refresh" }],
+          [5, 1, "article"],
+          [6, 5, "span", { text: `$${100 + tick}` }],
+          [7, 5, "button", { name: "Buy" }],
+        ]),
+      );
+      refs();
+      const f = await fixture();
+      expect((await run(f, f.first.context_id, { ref: "e2" })).message).toContain(
+        "changed by itself",
+      );
+      expect(await run(f, (await f.command("sync")).context_id, { ref: "e2" })).toEqual({});
+      expect(await run(f, (await f.command("sync")).context_id, { ref: "e7" })).toMatchObject({
+        message: changed,
+      });
+      expect(f.native).toHaveBeenCalledOnce();
+    });
+
+    it("reports a ticking clock once instead of refusing every sync and action", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      const f = await fixture();
+      const refused = await cycle(f, f.first.context_id);
+      expect(refused).toMatchObject({
+        message: expect.stringContaining('"10:00:00" → "10:00:01"'),
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(refused.message).toContain("--depends-on");
+      expect(f.native).not.toHaveBeenCalled();
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const synced = await f.command("sync");
+        expect(synced.context_id).toBeTruthy();
+        expect(await cycle(f, synced.context_id)).toEqual({});
+      }
+      expect(f.native).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps refusing when the action's own region changes", async () => {
+      live((tick) => scene("10:00:00", `Pay ${tick}`));
+      const f = await fixture();
+      for (let attempt = 0, context = f.first.context_id; attempt < 2; attempt++) {
+        expect(await cycle(f, context)).toMatchObject({
+          message: "The action's observed content changed; synchronize and replan",
+        });
+        context = (await f.command("sync")).context_id;
+      }
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("still refuses new content beside a tolerated clock", async () => {
+      live((tick) => scene(`10:00:0${tick}`, "Continue", tick >= 3));
+      const f = await fixture();
+      expect((await cycle(f, f.first.context_id)).message).toContain("changed by itself");
+      const synced = await f.command("sync");
+      expect(await cycle(f, synced.context_id)).toMatchObject({
+        message: "The action's observed content changed; synchronize and replan",
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("keeps explicit dependencies exact after learning page activity", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      vi.mocked(resolveActionTarget).mockImplementation(
+        async (_c, _s, _t, params) =>
+          ({
+            backendNodeId: (params as { ref?: string }).ref === "e5" ? 5 : 4,
+            frameId: "frame",
+            cdpTarget: { tabId: 7 },
+            tab: { tabId: 7 },
+          }) as Awaited<ReturnType<typeof resolveActionTarget>>,
+      );
+      const f = await fixture();
+      expect((await cycle(f, f.first.context_id)).message).toContain("changed by itself");
+      const synced = await f.command("sync");
+      expect(await cycle(f, synced.context_id, ["e5"])).toMatchObject({
+        message: "The action's observed content changed; synchronize and replan",
+      });
+      expect(f.native).not.toHaveBeenCalled();
+    });
+
+    it("does not let a refused context retry with newly learned tolerance", async () => {
+      live((tick) => scene(`10:00:0${tick}`));
+      const f = await fixture();
+      expect((await cycle(f, f.first.context_id)).message).toContain("changed by itself");
+      expect(await cycle(f, f.first.context_id)).toMatchObject({
+        message: "This action requires the context returned by the latest cooperate sync",
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(f.native).not.toHaveBeenCalled();
+      // The fresh observation activates the learned clock, preserving the loop fix.
+      const synced = await f.command("sync");
+      expect(await cycle(f, synced.context_id)).toEqual({});
+      expect(f.native).toHaveBeenCalledOnce();
+    });
+
+    it("keeps a learned node exact when it belongs to a later action's region", async () => {
+      // Form A holds Continue (4); form B holds a changing price (7) and Pay (8).
+      const shop = (price: string): VomScene => ({
+        viewport: { width: 800, height: 600 },
+        nodes: [
+          { id: 1, parentId: null, tag: "main", name: "", role: "main" },
+          { id: 2, parentId: 1, tag: "form", name: "A", role: "form" },
+          { id: 4, parentId: 2, tag: "button", name: "Continue", role: "button" },
+          { id: 6, parentId: 1, tag: "form", name: "B", role: "form" },
+          { id: 7, parentId: 6, tag: "span", name: "", text: price },
+          { id: 8, parentId: 6, tag: "button", name: "Pay", role: "button" },
+        ].map((node) => ({
+          ...node,
+          backendNodeId: node.id,
+          frameId: "frame",
+          rect: { x: 0, y: 0, w: 20, h: 20 },
+          paintOrder: 1,
+          position: "static",
+          pointerEvents: "auto",
+        })),
+      });
+      live((tick) => shop(`$${100 + tick}`));
+      vi.mocked(resolveActionTarget).mockImplementation(
+        async (_c, _s, _t, params) =>
+          ({
+            backendNodeId: (params as { ref?: string }).ref === "e8" ? 8 : 4,
+            frameId: "frame",
+            cdpTarget: { tabId: 7 },
+            tab: { tabId: 7 },
+          }) as Awaited<ReturnType<typeof resolveActionTarget>>,
+      );
+      const click = (f: Awaited<ReturnType<typeof fixture>>, context: string, ref: string) => {
+        f.change({ structure: f.controller.view(7)!.revision + 100 });
+        return f.controller.run(
+          {
+            id: "shop",
+            method: "tool.click",
+            params: { session_id: "shared", tab_id: 7, context_id: context, ref },
+          },
+          f.cdp,
+          f.abort.signal,
+          (runner) => runner.send(7, "Input.dispatchMouseEvent", { type: "mousePressed" }),
+        ) as Promise<Record<string, any>>;
+      };
+      const f = await fixture();
+      // Acting in form A learns the price in form B as page activity.
+      expect((await click(f, f.first.context_id, "e4")).message).toContain("changed by itself");
+      // Form A actions now tolerate the price...
+      expect(await click(f, (await f.command("sync")).context_id, "e4")).toEqual({});
+      expect(f.native).toHaveBeenCalledOnce();
+      // ...but paying in form B still requires the price observed at sync.
+      expect(await click(f, (await f.command("sync")).context_id, "e8")).toMatchObject({
+        message: "The action's observed content changed; synchronize and replan",
+        data: { reason: "cooperation_sync_required", effect_state: "none" },
+      });
+      expect(f.native).toHaveBeenCalledOnce();
+    });
+  });
   it("uses updated field evidence after a delta when a later cosmetic mutation occurs", async () => {
     const scene = (value: string): VomScene => ({
       viewport: { width: 800, height: 600 },
