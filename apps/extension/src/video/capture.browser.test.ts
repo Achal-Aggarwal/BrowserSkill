@@ -9,8 +9,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { attachVideoBackground, type BrowserSend as Send } from "./browser-fixture";
+import {
+  attachVideoBackground,
+  type BrowserSend as Send,
+  saveVideoEvidence,
+} from "./browser-fixture";
 import { createDshVideoFixture } from "./dsh-fixture";
+import { readVideoPixels } from "./playback-fixture";
 
 const run = promisify(execFile);
 
@@ -257,6 +262,8 @@ describe.skipIf(!process.env.BSK_VIDEO_CHROME || !process.env.BSK_VIDEO_BSK)(
             );
             const output = path.join(directory, "result.mp4");
             await cli("video", "save", "--recording", id, "--out", output);
+            const version = await send("Browser.getVersion");
+            await saveVideoEvidence("capture", { version, recording: stopped.recording }, output);
             expect((await stat(output)).size).toBe(stopped.recording.byte_size);
             await expect(
               cli("video", "save", "--recording", id, "--out", output),
@@ -276,8 +283,9 @@ describe.skipIf(!process.env.BSK_VIDEO_CHROME || !process.env.BSK_VIDEO_BSK)(
               .toBe(true);
             const pixels = await evaluate<number[][]>(
               preview.sessionId,
-              `(async()=>{const v=document.querySelector('video'),c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;const ctx=c.getContext('2d'),pixels=[];for(const time of [.2,v.duration-.3]){v.currentTime=time;await new Promise(r=>v.onseeked=r);ctx.drawImage(v,0,0);pixels.push(Array.from(ctx.getImageData(c.width/2,c.height/2,1,1).data));}return pixels})()`,
+              `(${readVideoPixels.toString()})(document.querySelector('video'), [.2, document.querySelector('video').duration-.3])`,
             );
+            await saveVideoEvidence("capture", { version, recording: stopped.recording, pixels });
             expect(pixels[0][0]).toBeGreaterThan(240);
             expect(pixels[1][1]).toBeGreaterThan(240);
             expect(pixels[1][0]).toBeLessThan(15);
@@ -783,6 +791,11 @@ describe.skipIf(!process.env.BSK_VIDEO_CHROME || !process.env.BSK_VIDEO_BSK)(
                 recordingId,
                 output,
               });
+              await saveVideoEvidence(
+                "capture-dsh",
+                { version, recording: finished.recording },
+                output,
+              );
               expect((await stat(output)).size).toBe(finished.recording.byte_size);
               await expect(
                 dsh.call("bsk_inspect", {
@@ -820,10 +833,15 @@ describe.skipIf(!process.env.BSK_VIDEO_CHROME || !process.env.BSK_VIDEO_BSK)(
                 });
               // The preview intentionally preloads only metadata. Seek to
               // request and verify a decoded frame from the completed task.
-              const pixel = await evaluate<number[]>(
+              const [pixel] = await evaluate<number[][]>(
                 preview.sessionId,
-                `(async()=>{const v=document.querySelector('video'),c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;v.currentTime=v.duration-.2;await new Promise(r=>v.onseeked=r);const ctx=c.getContext('2d');ctx.drawImage(v,0,0);return Array.from(ctx.getImageData(c.width/2,c.height/2,1,1).data)})()`,
+                `(${readVideoPixels.toString()})(document.querySelector('video'), [document.querySelector('video').duration-.2])`,
               );
+              await saveVideoEvidence("capture-dsh", {
+                version,
+                recording: finished.recording,
+                pixel,
+              });
               expect(pixel[0]).toBeGreaterThan(240);
               expect(pixel[1]).toBeLessThan(15);
             } finally {

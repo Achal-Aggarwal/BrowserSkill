@@ -1,3 +1,5 @@
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { expect } from "vitest";
 
 export type BrowserSend = <T = Record<string, unknown>>(
@@ -47,4 +49,19 @@ export async function attachVideoBackground(send: BrowserSend, name: string) {
     )
     .toBe(true);
   return found!;
+}
+
+/** Keep the MP4 before pixel assertions so a failed CI run remains diagnosable. */
+export async function saveVideoEvidence(
+  name: string,
+  details: unknown,
+  video?: string | Uint8Array,
+) {
+  const directory = process.env.BSK_VIDEO_ARTIFACTS;
+  if (!directory) return;
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, `${name}.json`), JSON.stringify(details, null, 2));
+  const destination = path.join(directory, `${name}.mp4`);
+  if (typeof video === "string") await copyFile(video, destination);
+  else if (video) await writeFile(destination, video);
 }
