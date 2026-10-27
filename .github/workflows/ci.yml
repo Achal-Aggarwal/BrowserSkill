@@ -290,7 +290,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
-      BSK_VIDEO_ARTIFACTS: ${{ runner.temp }}/video-regression
+      BSK_VIDEO_ARTIFACTS: ${{ github.workspace }}/evals/browser/results/video-regression
 
     steps:
       - uses: actions/checkout@v6
