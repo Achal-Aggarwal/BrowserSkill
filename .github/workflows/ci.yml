@@ -294,6 +294,9 @@ jobs:
     # Allows Chrome for Testing's user-namespace sandbox without a custom
     # AppArmor profile for its temporary installation path.
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      BSK_VIDEO_ARTIFACTS: ${{ github.workspace }}/evals/browser/results/video-regression
 
     steps:
       - uses: actions/checkout@v6
@@ -311,6 +314,8 @@ jobs:
           curl --fail --silent --show-error --location --retry 3 "$video_chrome_download" --output "$RUNNER_TEMP/video-chrome.zip"
           unzip -q "$RUNNER_TEMP/video-chrome.zip" -d "$RUNNER_TEMP/video-chrome"
           echo "BSK_VIDEO_CHROME=$RUNNER_TEMP/video-chrome/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          mkdir -p "$BSK_VIDEO_ARTIFACTS"
+          "$RUNNER_TEMP/video-chrome/chrome-linux64/chrome" --version | tee "$BSK_VIDEO_ARTIFACTS/chrome-version.txt"
       - name: Build CLI, extension and DSH plugin
         run: |
           cargo build -p bsk --locked
@@ -320,7 +325,16 @@ jobs:
         working-directory: apps/extension
         env:
           BSK_VIDEO_BSK: ../../target/debug/bsk
-        run: pnpm exec vitest run src/video/*.browser.test.ts
+        run: pnpm exec vitest run src/video/*.browser.test.ts --reporter=default --reporter=json --outputFile.json="$BSK_VIDEO_ARTIFACTS/results.json"
+
+      - name: Upload video regression evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-regression
+          path: ${{ env.BSK_VIDEO_ARTIFACTS }}/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build extension for the isolated native-dialog daemon
         env:
