@@ -1,4 +1,5 @@
 import type { VomNode, VomScene } from "@browser-skill/vom";
+import { playbackProgressMedia } from "./media-progress";
 
 /** Reuse the observation's semantic nodes. CSS classes and pixel positions are
  * deliberately absent; the interaction layer rechecks the live hit target. */
@@ -33,6 +34,12 @@ const semanticAttributes = [
   "aria-pressed",
   "aria-disabled",
   "aria-hidden",
+  "aria-controls",
+  "aria-valuemin",
+  "aria-valuemax",
+  "min",
+  "max",
+  "step",
   "readonly",
   "required",
 ];
@@ -55,6 +62,20 @@ const isTarget = (node: VomNode, target: EvidenceTarget) =>
 /** Whether the observation contains the target, so its region can be checked. */
 export function observesTarget(evidence: ObservationEvidence, target: EvidenceTarget): boolean {
   return evidence.nodes.some((node) => isTarget(node, target));
+}
+
+/** Specific keyboard recipients visible to the browser's accessibility tree.
+ * Document/iframe focus is not a reliable substitute for the actual recipient. */
+export function observedKeyboardTargets(evidence: ObservationEvidence): EvidenceTarget[] {
+  return evidence.nodes
+    .filter(
+      (node) =>
+        node.focused &&
+        node.backendNodeId !== undefined &&
+        !["body", "html", "iframe", "frame"].includes(node.tag) &&
+        node.role !== "RootWebArea",
+    )
+    .map((node) => ({ backendNodeId: node.backendNodeId!, frameId: node.frameId }));
 }
 
 const positioned = (node: VomNode) => ["absolute", "fixed"].includes(node.position);
@@ -232,6 +253,30 @@ function signature(
       learnedText.set(holder, set);
     }
   }
+  // A semantic region may include both Pause and the timeline. Only a direct
+  // dependency on the timeline, its player, or a containing element makes its
+  // value exact; sharing the inferred region with a button does not.
+  // Keep the original nodes intact: media controls cannot become learned text.
+  const media = nodes.filter((node) => node.tag === "video" || node.tag === "audio");
+  const ignoredProgress = new Map<VomNode, VomNode>();
+  const explicitlyObserved = (node: VomNode) =>
+    !!anchor && (tree.within(node, anchor) || (node.domAncestorIds ?? []).includes(anchor.id));
+  if (target)
+    for (const node of nodes) {
+      if (explicitlyObserved(node) || node.value === undefined) continue;
+      const owner = playbackProgressMedia(
+        {
+          ...node,
+          // Only native ownership or complete raw DOM evidence can establish
+          // that a control is form-free. Pruned ancestors are not evidence.
+          inForm: node.inForm !== false,
+        },
+        media
+          .filter((item) => item.frameId === node.frameId)
+          .map((item) => ({ id: item.attrs?.id, node: item })),
+      );
+      if (owner && !explicitlyObserved(owner.node)) ignoredProgress.set(node, owner.node);
+    }
   // Identity, structure, state and visibility of learned nodes remain checked.
   const facts = (node: VomNode, relax: boolean) => {
     const tolerate = relax && tolerated(node);
@@ -246,7 +291,8 @@ function signature(
           ? withoutLearned(node.name, learnedText.get(node))
           : node.name,
       tolerate ? undefined : node.text,
-      node.value,
+      ignoredProgress.has(node) ? undefined : node.value,
+      node.inForm,
       node.checked,
       node.disabled,
       node.inert,
@@ -266,6 +312,8 @@ function signature(
       .filter((node) => node.value !== undefined || node.checked !== undefined)
       .map((node) => facts(node, false)),
     nodes.filter((node) => node.modal).map((node) => facts(node, false)),
+    // Replacing the player or its source still invalidates the observation.
+    [...new Set(ignoredProgress.values())].map((node) => [...facts(node, false), node.attrs?.src]),
   ]);
 }
 
@@ -276,7 +324,8 @@ function signature(
  * wherever it appears as whole words. Without a target this applies to the
  * whole page. With a target it never applies inside the target's own region,
  * as described in signature(). Form values, checked states and modal layers
- * stay exact everywhere.
+ * stay exact everywhere except positively identified, non-submitted media
+ * progress values outside the explicitly observed target subtree.
  */
 export function sameObservationEvidence(
   before: ObservationEvidence,
