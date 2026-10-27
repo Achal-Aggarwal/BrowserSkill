@@ -19,7 +19,7 @@ port 52800. `BSK_COOP_EXTENSION` overrides the built extension directory. Chrome
 uses `Extensions.loadUnpacked`; use `BSK_COOP_LOAD_CDP=0` with builds that support the load
 extension command-line flags instead. `BSK_COOP_ARTIFACTS` selects the result directory.
 
-The 37 cases cover continuously advancing progress during sync (including incremental sync),
+The 53 cases cover continuously advancing progress during sync (including incremental sync),
 dependencies without a focus target, ordinary business sliders, submitted timelines,
 form-owned timelines, simultaneous video and order changes, and a programmatic focus change.
 They also combine PR #497's learned-text behavior with the media fix: a learned price becomes
@@ -31,7 +31,12 @@ timeline in one player region. Controls declare the timeline or whole player, fo
 or change a business field in the same player. Focus changes before a delta sync must refresh
 semantic evidence, and a document becoming an explicit keyboard recipient revokes the key.
 Closed shadow-root players also allow progress but reject a source change with or without
-a simultaneous timeline update.
+a simultaneous timeline update. Form-ownership cases keep the timeline's accessible name
+while removing the form from the semantic tree (`role=none`, `role=presentation`, and
+`display:contents`). They cover native form owners, external `form` associations, open and
+closed shadow roots, custom progress widgets, and formless positive controls. The oracle
+asserts the actual form owner and accessible name before changing the value, so losing a
+label cannot accidentally make a negative case pass.
 Positive cases require one received Space event
 and a paused video. Negative cases require no key event, no simulated purchase, no pause call and
 `effect_state: none`. Every created session, daemon and temporary browser profile is cleaned up.

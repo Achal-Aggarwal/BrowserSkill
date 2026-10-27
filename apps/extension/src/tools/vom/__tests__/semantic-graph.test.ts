@@ -985,3 +985,30 @@ it("retains browser focus on semantic nodes without trusting a DOM focused attri
   expect(scene.nodes.find((node) => node.backendNodeId === 2)?.focused).toBe(true);
   expect(scene.nodes.find((node) => node.backendNodeId === 3)?.focused).toBeUndefined();
 });
+
+it.each([
+  "none",
+  "presentation",
+])("retains native form membership when the %s form is omitted", (role) => {
+  const scene = buildSemanticVomScene({
+    viewport: { width: 800, height: 600 },
+    rootFrameId: "main",
+    documents: [
+      document(
+        "main",
+        [],
+        [
+          dom(1, null, "main"),
+          dom(2, 1, "form", { role }),
+          {
+            ...dom(3, 2, "input", { type: "range", "aria-label": "Playback progress" }),
+            formValue: "0",
+            inForm: true,
+          },
+        ],
+      ),
+    ],
+  });
+  expect(scene.nodes.some((n) => n.tag === "form")).toBe(false);
+  expect(scene.nodes.find((n) => n.backendNodeId === 3)?.inForm).toBe(true);
+});

@@ -258,7 +258,6 @@ function signature(
   // value exact; sharing the inferred region with a button does not.
   // Keep the original nodes intact: media controls cannot become learned text.
   const media = nodes.filter((node) => node.tag === "video" || node.tag === "audio");
-  const forms = new Set(nodes.filter((node) => node.tag === "form").map((node) => node.id));
   const ignoredProgress = new Map<VomNode, VomNode>();
   const explicitlyObserved = (node: VomNode) =>
     !!anchor && (tree.within(node, anchor) || (node.domAncestorIds ?? []).includes(anchor.id));
@@ -268,9 +267,9 @@ function signature(
       const owner = playbackProgressMedia(
         {
           ...node,
-          inForm:
-            tree.ancestors(node).some((ancestor) => ancestor.tag === "form") ||
-            (node.domAncestorIds ?? []).some((id) => forms.has(id)),
+          // Only native ownership or complete raw DOM evidence can establish
+          // that a control is form-free. Pruned ancestors are not evidence.
+          inForm: node.inForm !== false,
         },
         media
           .filter((item) => item.frameId === node.frameId)
@@ -293,6 +292,7 @@ function signature(
           : node.name,
       tolerate ? undefined : node.text,
       ignoredProgress.has(node) ? undefined : node.value,
+      node.inForm,
       node.checked,
       node.disabled,
       node.inert,

@@ -34,9 +34,10 @@
   if (variant === 'text') dynamic.innerHTML = '<span id="clock">Playback tick 0</span>';
   if (['range', 'submitted-range', 'form-range', 'combined', 'source-range', 'src-range', 'same-region', 'same-region-field'].includes(variant)) dynamic.innerHTML = '<label>Playback progress <input id="progress" type="range" min="0" max="10000" value="0"></label>';
   if (variant === 'business-range') dynamic.innerHTML = '<label>Order amount <input id="progress" type="range" min="0" max="10000" value="0"></label>';
-  if (variant === 'submitted-range') document.querySelector('#progress').name = 'order_amount';
+  let progress = document.querySelector('#progress');
+  if (variant === 'submitted-range') progress.name = 'order_amount';
   if (variant === 'form-range') {
-    const form = document.createElement('form'); form.id = 'order-form'; dynamic.append(form); form.append(document.querySelector('#progress'));
+    const form = document.createElement('form'); form.id = 'order-form'; dynamic.append(form); form.append(progress.closest('label') || progress);
   }
   if (variant === 'combined') dynamic.insertAdjacentHTML('beforeend', '<label>Order total <input id="order" value="100"></label>');
   if (variant === 'field' || variant === 'focus') dynamic.innerHTML = '<label>Order total <input id="order" value="100"></label>';
@@ -53,10 +54,42 @@
     region.id = 'player';
     region.setAttribute('aria-label', 'Video player');
     controls.before(region);
-    const timeline = document.querySelector('#progress');
+    const timeline = progress;
     region.append(video, document.querySelector('#pause'), timeline.closest('label') || timeline);
     controls.remove();
     if (variant === 'same-region-field') region.insertAdjacentHTML('beforeend', '<label>Order total <input id="order" value="100"></label>');
+  }
+  // Preserve the accessible name while removing the form's own visible text.
+  // This makes role=none/presentation forms actually disappear from the VOM.
+  if (query.has('formRole')) {
+    const form = document.createElement(query.get('nonForm') === 'true' ? 'div' : 'form');
+    form.id = 'order-form';
+    form.setAttribute('role', query.get('formRole') === 'external' ? 'none' : query.get('formRole'));
+    if (query.get('formContents') === 'true') form.style.display = 'contents';
+    const label = progress.closest('label');
+    progress.setAttribute('aria-label', query.get('businessLabel') === 'true' ? 'Order amount' : 'Playback progress');
+    dynamic.append(form);
+    if (query.get('formRole') === 'external') { progress.setAttribute('form', form.id); dynamic.append(progress); }
+    else form.append(progress);
+    label?.remove();
+    if (query.get('named') === 'true') progress.name = 'start_time';
+  }
+  if (query.get('customProgress') === 'true') {
+    const widget = document.createElement('div');
+    widget.id = 'progress'; widget.setAttribute('role', 'slider'); widget.tabIndex = 0;
+    widget.setAttribute('aria-label', 'Playback progress');
+    widget.setAttribute('aria-valuenow', '0'); widget.setAttribute('aria-valuemin', '0'); widget.setAttribute('aria-valuemax', '10000');
+    widget.style.cssText = 'width:300px;height:20px;background:#ccd6e0';
+    progress.replaceWith(widget); progress = widget;
+  }
+  if (query.has('controlShadow')) {
+    const container = progress.closest('form') || progress.closest('label') || progress;
+    const host = document.createElement('div'); dynamic.append(host);
+    host.attachShadow({mode: query.get('controlShadow')}).append(video, container);
+    if (query.get('shadowHostForm') === 'true') {
+      const outer = document.createElement('form'); outer.id = 'outer-form'; outer.setAttribute('role', 'none');
+      host.before(outer); outer.append(host);
+    }
   }
   const pause = () => { stats.pauseCalls++; video.pause(); };
   document.querySelector('#pause').addEventListener('click', () => { stats.clicks++; pause(); });
@@ -71,7 +104,8 @@
       if (video.paused) return;
       stats.ticks++;
       if (variant === 'text') document.querySelector('#clock').textContent = `Playback tick ${stats.ticks}`;
-      if (document.querySelector('#progress')) document.querySelector('#progress').value = String(stats.ticks % 10000);
+      if (progress instanceof HTMLInputElement) progress.value = String(stats.ticks % 10000);
+      else if (progress) progress.setAttribute('aria-valuenow', String(stats.ticks % 10000));
       if (['field', 'combined', 'same-region-field'].includes(variant)) document.querySelector('#order').value = String(100 + stats.ticks);
       if (variant === 'body-recipient') { document.body.tabIndex = 0; document.body.setAttribute('role', 'button'); }
       if (variant === 'focus') document.querySelector('#order').focus();
@@ -103,7 +137,11 @@
     sourceSrc: video.querySelector('source')?.src,
     focused: document.activeElement?.id || document.activeElement?.tagName,
     clock: document.querySelector('#clock')?.textContent,
-    progress: document.querySelector('#progress')?.value,
+    progress: progress instanceof HTMLInputElement ? progress.value : progress?.getAttribute('aria-valuenow'),
+    formOwner: (progress instanceof HTMLInputElement ? progress.form : progress?.closest('form'))?.id || null,
+    progressLabel: progress?.getAttribute('aria-label') || progress?.labels?.[0]?.textContent?.trim(),
+    controlName: progress?.getAttribute('name') || '',
+    progressShadow: progress?.getRootNode() instanceof ShadowRoot,
     order: document.querySelector('#order')?.value,
     price: document.querySelector('#price')?.textContent,
   });

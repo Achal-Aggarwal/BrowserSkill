@@ -378,6 +378,177 @@ const cases = [
     allow: false,
     focus: true,
   },
+  {
+    name: "form_role_none_progress_still_blocked",
+    formRole: "none",
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "form_role_presentation_progress_still_blocked",
+    formRole: "presentation",
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "form_display_contents_progress_still_blocked",
+    formRole: "none",
+    formContents: true,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "external_form_owner_progress_still_blocked",
+    formRole: "external",
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "form_role_none_named_progress_still_blocked",
+    formRole: "none",
+    named: true,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "form_role_none_explicit_timeline_still_blocked",
+    formRole: "none",
+    dependencies: ["#progress"],
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    allow: false,
+  },
+  {
+    name: "form_role_none_whole_page_still_blocked",
+    formRole: "none",
+    dependencies: false,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    allow: false,
+  },
+  {
+    name: "form_role_none_business_label_still_blocked",
+    formRole: "none",
+    businessLabel: true,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "non_form_role_none_progress_allowed",
+    formRole: "none",
+    nonForm: true,
+    allow: true,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+  },
+  {
+    name: "open_shadow_form_progress_still_blocked",
+    formRole: "none",
+    controlShadow: "open",
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "closed_shadow_form_progress_still_blocked",
+    formRole: "none",
+    controlShadow: "closed",
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "closed_shadow_continuous_progress_allowed",
+    controlShadow: "closed",
+    continuous: true,
+    allow: true,
+    variant: "range",
+    target: true,
+    manual: false,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+  },
+  {
+    name: "open_shadow_continuous_progress_allowed",
+    controlShadow: "open",
+    continuous: true,
+    allow: true,
+    variant: "range",
+    target: true,
+    manual: false,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+  },
+  {
+    name: "shadow_host_form_does_not_own_timeline",
+    controlShadow: "closed",
+    shadowHostForm: true,
+    continuous: true,
+    allow: true,
+    variant: "range",
+    target: true,
+    manual: false,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+  },
+  {
+    name: "custom_progress_in_pruned_form_still_blocked",
+    formRole: "none",
+    customProgress: true,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+    allow: false,
+  },
+  {
+    name: "custom_non_form_progress_allowed",
+    customProgress: true,
+    allow: true,
+    variant: "range",
+    target: true,
+    manual: true,
+    ownershipCheck: true,
+    dependencies: ["#pause"],
+  },
 ];
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -423,7 +594,24 @@ try {
         const scope = ["--session", session];
         let oracle;
         try {
-          const url = `${base}/?variant=${scenario.variant}&case=${scenario.name}&interval=${scenario.continuous ? 10 : 80}&shadow=${scenario.closedShadow ? "closed" : "none"}`;
+          const query = new URLSearchParams({
+            variant: scenario.variant,
+            case: scenario.name,
+            interval: String(scenario.continuous ? 10 : 80),
+            shadow: scenario.closedShadow ? "closed" : "none",
+          });
+          for (const key of [
+            "formRole",
+            "formContents",
+            "named",
+            "businessLabel",
+            "nonForm",
+            "controlShadow",
+            "customProgress",
+            "shadowHostForm",
+          ])
+            if (scenario[key] !== undefined) query.set(key, String(scenario[key]));
+          const url = `${base}/?${query}`;
           await ok(["navigate", url, ...scope]);
           const target = (await send("Target.getTargets")).targetInfos.find(
             (target) => target.url === url,
@@ -516,20 +704,56 @@ try {
           }
           const before = await read("window.report()");
           assert.equal(before.paused, false);
+          if (scenario.ownershipCheck || scenario.variant === "form-range") {
+            assert.equal(
+              before.progressLabel,
+              scenario.businessLabel ? "Order amount" : "Playback progress",
+              "The regression must keep the media-like accessible name",
+            );
+            assert.equal(
+              before.formOwner,
+              scenario.variant === "form-range" || (scenario.formRole && !scenario.nonForm)
+                ? "order-form"
+                : null,
+            );
+            if (scenario.ownershipCheck)
+              assert.equal(before.controlName, scenario.named ? "start_time" : "");
+            assert.equal(before.progressShadow, !!scenario.controlShadow);
+          }
           // Start page-origin updates after the observation, before the proposed input.
           await read(
             scenario.learn || scenario.manual
               ? "window.tickNoise(); true"
               : "window.startNoise(); true",
           );
-          await delay(320);
-          const atAction = await read("window.report()");
-          assert(
-            scenario.source
-              ? atAction.presentedFrames > before.presentedFrames
-              : atAction.decodedFrames > before.decodedFrames,
-            "Video must actually decode frames, including after source reload",
-          );
+          let progressReport;
+          let sourceBaseline;
+          let atAction;
+          try {
+            atAction = await poll(async () => {
+              progressReport = await read("window.report()");
+              // A reload resets the native frame counter. Establish a new
+              // baseline only after currentSrc changes, then require more
+              // decoded frames from that same source on a later read.
+              if (scenario.source) {
+                if (progressReport.currentSrc === before.currentSrc || !progressReport.currentSrc)
+                  return;
+                if (sourceBaseline?.currentSrc !== progressReport.currentSrc) {
+                  sourceBaseline = progressReport;
+                  return;
+                }
+              }
+              const advanced =
+                progressReport.decodedFrames > (sourceBaseline ?? before).decodedFrames;
+              return advanced && progressReport.ticks > before.ticks && progressReport;
+            }, "actual video frames and page updates before input");
+          } catch (error) {
+            await writeFile(
+              join(artifacts, scenario.name + ".progress-error.json"),
+              JSON.stringify({ before, current: progressReport }, null, 2),
+            );
+            throw error;
+          }
           if (scenario.source) assert.notEqual(atAction.currentSrc, before.currentSrc);
           assert(atAction.ticks > before.ticks, "Page updates must run before the input");
           if (atAction.progress !== undefined) assert.notEqual(atAction.progress, before.progress);
@@ -561,6 +785,7 @@ try {
             learning,
             before,
             atAction,
+            sourceBaseline,
             coordinationReady: wait.ready,
             action,
             after,
@@ -571,11 +796,16 @@ try {
             JSON.stringify(evidence, null, 2),
           );
           if (scenario.name === "timer_text_untargeted_space") {
-            const screenshot = await send("Page.captureScreenshot", { format: "png" }, oracle);
-            await writeFile(
-              join(artifacts, "blocked-preview.png"),
-              Buffer.from(screenshot.data, "base64"),
-            );
+            // Diagnostic only: all input and page-state assertions still run.
+            try {
+              const screenshot = await send("Page.captureScreenshot", { format: "png" }, oracle);
+              await writeFile(
+                join(artifacts, "blocked-preview.png"),
+                Buffer.from(screenshot.data, "base64"),
+              );
+            } catch (error) {
+              await writeFile(join(artifacts, "blocked-preview-error.txt"), String(error));
+            }
           }
           assert.equal(wait.ready, true, "No person should be holding control");
           assert.equal(after.purchases, 0, "No simulated purchase may execute");

@@ -37,6 +37,9 @@ export interface VomNode {
   /** Browser accessibility focus, used to protect implicit keyboard recipients. */
   focused?: boolean;
   placeholder?: string;
+  /** Native form ownership, or raw DOM form containment for custom widgets.
+   * Absence means unknown, never proof that a control is outside a form. */
+  inForm?: boolean;
   inputState?: "empty" | "filled" | "default" | "unknown";
   href?: string; // hostname of external link target; omitted for same-origin links
   text?: string;

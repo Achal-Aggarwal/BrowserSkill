@@ -305,6 +305,7 @@ const mediaScene = () => [
   {
     ...node(7, 1, "slider", "Playback progress"),
     tag: "input",
+    inForm: false,
     value: "1",
     attrs: { type: "range" },
   },
@@ -345,6 +346,7 @@ it.each([
   }
   if (kind === "named input") progress.attrs!.name = "amount";
   if (kind === "form member") {
+    progress.inForm = true;
     before.push(node(8, 1, "form", "Order"));
     progress.domAncestorIds = [8, 1];
   }
@@ -446,4 +448,22 @@ it("keeps explicitly declared DOM ancestors exact even when an AX parent differs
   expect(sameObservationEvidence(before, after, { backendNodeId: 8, frameId: "frame" })).toBe(
     false,
   );
+});
+
+it.each([
+  true,
+  undefined,
+])("keeps media-labelled controls exact when native form membership is %s", (inForm) => {
+  const before = { nodes: mediaScene() };
+  before.nodes[6].inForm = inForm;
+  const after = structuredClone(before);
+  after.nodes[6].value = "2";
+  expect(sameObservationEvidence(before, after, target)).toBe(false);
+});
+
+it("rejects a change in form membership even when the timeline value is unchanged", () => {
+  const before = { nodes: mediaScene() };
+  const after = structuredClone(before);
+  after.nodes[6].inForm = true;
+  expect(sameObservationEvidence(before, after, target)).toBe(false);
 });

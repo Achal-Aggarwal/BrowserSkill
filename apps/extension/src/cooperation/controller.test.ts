@@ -2245,7 +2245,10 @@ describe("default collaboration preserves the original unattended lifetime", () 
 });
 
 describe("looping preview action guards", () => {
-  type PreviewNode = Pick<VomNode, "id" | "parentId" | "tag" | "role" | "name" | "attrs" | "value">;
+  type PreviewNode = Pick<
+    VomNode,
+    "id" | "parentId" | "tag" | "role" | "name" | "attrs" | "value" | "inForm"
+  >;
   const previewScene = (seconds: number, range = false): VomScene => ({
     viewport: { width: 800, height: 600 },
     nodes: (
@@ -2268,6 +2271,7 @@ describe("looping preview action guards", () => {
               tag: "input",
               role: "slider",
               name: "Playback progress",
+              inForm: false,
               value: String(seconds),
               attrs: { type: "range" },
             }

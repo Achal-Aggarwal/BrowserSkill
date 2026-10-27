@@ -56,7 +56,9 @@ A clearly labelled media timeline with an unambiguous video/audio association ma
 beside a pause button, including in the same player region. Directly observing the timeline,
 its media element or a containing element keeps its value exact. Submitted inputs, form members,
 ordinary sliders and other business values remain protected. Media identity, child `<source>`
-declarations and the selected source stay exact. Unknown media controls retain ordinary checks.
+declarations and the selected source stay exact. Form ownership remains protected even when
+a form is omitted from the observation. Unknown media controls or unavailable form-ownership
+evidence retain ordinary checks.
 
 ## Scripts and file transfers
 
