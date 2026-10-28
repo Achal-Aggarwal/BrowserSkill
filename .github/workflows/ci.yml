@@ -322,6 +322,12 @@ jobs:
           cargo build -p bsk --locked
           pnpm --filter @browser-skill/extension build
           pnpm --filter @wxg-prc-cpg/browser-skill-dsh-plugin build
+      - name: Validate task termination on tab detachment
+        working-directory: apps/extension
+        env:
+          BSK_TAB_DETACH_CHROME: ${{ env.BSK_VIDEO_CHROME }}
+          BSK_TAB_DETACH_REPORT: ${{ env.BSK_VIDEO_ARTIFACTS }}/tab-detachment.json
+        run: pnpm exec vitest run src/session-manager/__tests__/tab-detachment.browser.test.ts
       - name: Validate capture, playback, recovery and CLI/DSH export
         working-directory: apps/extension
         env:

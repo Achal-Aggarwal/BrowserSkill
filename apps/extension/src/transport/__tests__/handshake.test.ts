@@ -67,8 +67,8 @@ function deferredFakeTransport(): { transport: Transport; emit: (frame: Protocol
 
 describe("performHandshake", () => {
   it("advertises the protocol compatibility boundary", () => {
-    expect(PROTOCOL_VERSION).toBe("1.5");
-    expect(MIN_COMPATIBLE_PROTOCOL).toBe("1.5");
+    expect(PROTOCOL_VERSION).toBe("1.6");
+    expect(MIN_COMPATIBLE_PROTOCOL).toBe("1.6");
   });
 
   it("sends system.handshake with identity and both compat fields", async () => {
@@ -174,7 +174,7 @@ describe("performHandshake", () => {
     const abort = new AbortController();
     const rejection = {
       code: "version_too_old" as const,
-      message: "local protocol 1.3 is below peer min_compatible_protocol 1.5",
+      message: "local protocol 1.3 is below peer min_compatible_protocol 1.6",
       data: {
         daemon_version: "0.3.3",
         daemon_protocol_version: "1.3",

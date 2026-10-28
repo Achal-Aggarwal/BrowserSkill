@@ -8,7 +8,7 @@ import type {
   RpcError,
 } from "./types";
 
-export const PROTOCOL_VERSION = "1.5";
+export const PROTOCOL_VERSION = "1.6";
 /**
  * Extension semver, injected at build time from `package.json` via
  * Vite's `define` (see `wxt.config.ts` and `vitest.config.ts`).
@@ -19,9 +19,9 @@ export const EXTENSION_VERSION: string =
  * Lowest **protocol** version this extension accepts (e.g. `"1.0"`).
  * This is the daemon floor; the daemon can independently accept older extensions.
  */
-// Native dialogs suspend RPCs. An older daemon cannot return the pending event
-// to a sequential agent, so refuse it before controlling any browser tabs.
-export const MIN_COMPATIBLE_PROTOCOL = "1.5";
+// Moving a controlled tab ends the session. Older daemons cannot consume the
+// terminal event and would leave the session active, so require this protocol.
+export const MIN_COMPATIBLE_PROTOCOL = "1.6";
 /**
  * **Deprecated** — legacy app-semver floor for wire compat with old
  * daemons. New code sends `"0.0.0"`; compat decisions ignore this.
