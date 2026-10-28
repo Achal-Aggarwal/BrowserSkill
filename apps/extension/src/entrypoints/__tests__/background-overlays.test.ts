@@ -79,6 +79,7 @@ function event<T extends unknown[] = []>() {
 async function fixture() {
   const overlay = new OverlayController();
   const onDetached = event<[number]>();
+  const onAttached = event<[number, chrome.tabs.TabAttachInfo]>();
   const onCreated = event<[chrome.tabs.Tab]>();
   const onCreatedNavigationTarget = event<[{ tabId: number; sourceTabId: number }]>();
   const sendMessage = vi.fn(
@@ -96,7 +97,7 @@ async function fixture() {
       onActivated: event(),
       onUpdated: event(),
       onCreated,
-      onAttached: event(),
+      onAttached,
       onRemoved: event(),
     },
     debugger: { onDetach: event() },
@@ -119,8 +120,32 @@ async function fixture() {
   (background as unknown as () => void)();
   const deps = vi.mocked(ToolDispatcher).mock.calls.at(-1)![0];
   const task = await deps.sessions.start("one");
-  return { overlay, onDetached, onCreated, onCreatedNavigationTarget, sendMessage, deps, task };
+  return {
+    overlay,
+    onDetached,
+    onAttached,
+    onCreated,
+    onCreatedNavigationTarget,
+    sendMessage,
+    deps,
+    task,
+  };
 }
+
+it("refreshes released-page controls and groups after attachment completes", async () => {
+  const f = await fixture();
+  f.overlay.applyAgentControlMode("one", "control");
+  f.deps.sessions.release("one");
+  f.onAttached.emit(10, { newWindowId: 90, newPosition: 0 });
+  await Promise.resolve();
+  expect(f.overlay.snapshot().controlVisible).toBe(false);
+  expect(f.sendMessage).toHaveBeenCalledWith(
+    10,
+    expect.objectContaining({ sessionId: null, mode: "hidden" }),
+  );
+  const groups = vi.mocked(AgentWindowTabGroups).mock.instances.at(-1)!;
+  expect(groups.sync).toHaveBeenCalledOnce();
+});
 
 it("refreshes native window identification after session changes and explicit tab claims", async () => {
   const f = await fixture();

@@ -130,6 +130,8 @@ Use browser-skill to open https://example.com, summarize the page, and end the b
 
 The agent opens its own window in the background, reads the page, returns the summary, and stops its task. External links or manually created tabs that land in the task window are moved to your most recently used normal window; a user window is created if none remain. Routing happens after tab creation, so a tab may briefly appear in the task window. Page-opened tabs and human assistance or recording are preserved. Harnesses that support skill slash commands can also use `/browser-skill`.
 
+Moving any controlled tab out of its original Agent Window ends the entire browser session, preserves every page in place, and removes its control indicators. Borrowed tabs also stay where they are. Moving a tab back does not resume the task; starting again requires a user decision. Reordering tabs within the same window is unaffected. Normal session stop still returns borrowed tabs and cleans up task pages.
+
 Chrome can still activate a window when a page opens a native popup. For observed task popups, the extension restores the previous Chrome window or minimized state if you have not switched windows. Chrome's public extension APIs cannot guarantee zero transient activation or restore focus to another application.
 
 <details>

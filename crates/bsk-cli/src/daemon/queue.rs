@@ -1333,6 +1333,17 @@ fn cancelled_error(entry: Option<&ToolInflightEntry>, default_msg: &str) -> RpcE
             ErrorCode::UserAborted,
             "tool dispatch interrupted by user".to_string(),
         ),
+        Some(CancelReason::UserMovedTab) => {
+            return RpcError {
+                code: ErrorCode::UserAborted,
+                message:
+                    "session ended because the user moved a controlled tab out of its Agent Window"
+                        .into(),
+                data: Some(
+                    serde_json::json!({ "reason": crate::rpc_reason::SESSION_USER_MOVED_TAB }),
+                ),
+            };
+        }
         Some(CancelReason::Cancelled) | None => (ErrorCode::Cancelled, default_msg.to_string()),
     };
     RpcError {
@@ -1581,6 +1592,21 @@ mod forward_one_cancel_reason_tests {
         let err = super::cancelled_error(Some(&g.entry()), "fallback");
         assert_eq!(err.code, ErrorCode::UserAborted);
         assert_eq!(err.message, "tool dispatch interrupted by user");
+    }
+
+    #[test]
+    fn user_moved_tab_cancellation_retains_terminal_reason() {
+        let reg = Arc::new(ToolInflightRegistry::new());
+        let sid = SessionId("ended".into());
+        let guard = reg.register("move".into(), sid.clone()).unwrap();
+        reg.cancel_session_with_reason(&sid, CancelReason::UserMovedTab);
+        let error = cancelled_error(Some(&guard.entry()), "fallback");
+        assert_eq!(error.code, ErrorCode::UserAborted);
+        assert_eq!(
+            error.data.unwrap()["reason"],
+            crate::rpc_reason::SESSION_USER_MOVED_TAB
+        );
+        assert!(error.message.contains("session ended"));
     }
 
     #[tokio::test]

@@ -41,7 +41,7 @@ describe("computeConnectedState (protocol-based compat)", () => {
   });
 
   it("returns version_skew when daemon protocol minor is newer", () => {
-    expect(computeConnectedState(handshake("1.6", PROTOCOL_VERSION))).toEqual({
+    expect(computeConnectedState(handshake("1.7", PROTOCOL_VERSION))).toEqual({
       kind: "version_skew",
     });
   });
@@ -61,11 +61,11 @@ describe("computeConnectedState (protocol-based compat)", () => {
   });
 
   it("rejects when extension is below daemon min_compatible_protocol", () => {
-    const result = computeConnectedState(handshake("1.5", "1.6"));
+    const result = computeConnectedState(handshake(PROTOCOL_VERSION, "1.7"));
     expect(result.kind).toBe("rejected");
     if (result.kind === "rejected") {
       expect(result.reason).toContain("min_compatible_protocol");
-      expect(result.reason).toContain("1.6");
+      expect(result.reason).toContain("1.7");
     }
   });
 
@@ -85,17 +85,18 @@ describe("computeConnectedState (protocol-based compat)", () => {
     "1.2",
     "1.3",
     "1.4",
-  ])("rejects a daemon %s without the out-of-band dialog control protocol", (protocol) => {
+    "1.5",
+  ])("rejects a daemon %s without terminal session events", (protocol) => {
     for (const floor of [undefined, "1.0"]) {
       expect(computeConnectedState(handshake(protocol, floor))).toMatchObject({
         kind: "rejected",
-        reason: expect.stringContaining("extension min_compatible_protocol 1.5"),
+        reason: expect.stringContaining("extension min_compatible_protocol 1.6"),
       });
     }
   });
 
   it("rejects malformed daemon min_compatible_protocol with a daemon-floor reason", () => {
-    const result = computeConnectedState(handshake("1.5", "not-a-protocol"));
+    const result = computeConnectedState(handshake(PROTOCOL_VERSION, "not-a-protocol"));
     expect(result.kind).toBe("rejected");
     if (result.kind === "rejected") {
       expect(result.reason).toContain("daemon min_compatible_protocol");
@@ -160,7 +161,8 @@ describe("ConnectionController connectionEnabled", () => {
     "1.2",
     "1.3",
     "1.4",
-  ])("disconnects a daemon %s that cannot release a blocked dialog", async (protocol) => {
+    "1.5",
+  ])("disconnects a daemon %s that cannot handle terminal session events", async (protocol) => {
     const controller = new ConnectionController();
     const transport = makeMockTransport();
     const onDisconnected = vi.fn();
@@ -309,7 +311,7 @@ describe("ConnectionController connectionEnabled", () => {
 
   const oldDaemonError: RpcError = {
     code: "version_too_old",
-    message: "local protocol 1.3 is below peer min_compatible_protocol 1.5",
+    message: "local protocol 1.3 is below peer min_compatible_protocol 1.6",
     data: {
       daemon_version: "0.3.3",
       daemon_protocol_version: "1.3",
@@ -320,7 +322,7 @@ describe("ConnectionController connectionEnabled", () => {
   const expectedUpgrade = {
     daemonVersion: "0.3.3",
     daemonProtocolVersion: "1.3",
-    requiredProtocolVersion: "1.5",
+    requiredProtocolVersion: "1.6",
   };
 
   function rejectHandshake(

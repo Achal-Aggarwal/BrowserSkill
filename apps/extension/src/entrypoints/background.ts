@@ -55,6 +55,7 @@ import {
   attachRecordFinishListener,
   attachRecordQueryListener,
   attachRecordStepListener,
+  clearRecordingForSession,
   hasActiveRecording,
   type RecordRuntimeDeps,
 } from "@/tools/record";
@@ -92,6 +93,18 @@ export default defineBackground(() => {
   });
   const sessions = new SessionManager({ remote: () => remoteEndpoint !== null });
   const windowTabGroups = new AgentWindowTabGroups(sessions);
+  // Capture the original owner before cooperation releases a detached page.
+  attachSessionEventHandler({
+    manager: sessions,
+    transport,
+    cdp: { detachSession: (id) => cdp.detachSession(id) },
+    onSessionReleased: (ctx) => {
+      dispatcher.cancelSession(ctx.sessionId);
+      cooperation.release(ctx.sessionId);
+      clearRecordingForSession(ctx.sessionId);
+    },
+    onSessionsChanged: onOverlaySessionStateChanged,
+  });
   const cooperation = attachCooperation(
     sessions,
     (tabId) => {
@@ -357,6 +370,12 @@ export default defineBackground(() => {
     if (!sessions.findByWindowId(tab.windowId)) return;
     void pushOverlayStateForTab(tab.id, tab.windowId);
   });
+  chrome.tabs.onAttached.addListener((tabId, { newWindowId }) => {
+    // Reconcile again after Chrome finishes the move; editing a group or
+    // messaging a page can fail transiently while it is being dragged.
+    void pushOverlayStateForTab(tabId, newWindowId);
+    windowTabGroups.sync();
+  });
   chrome.tabs.onDetached.addListener((tabId) => {
     void video.stopTab(tabId, "session_ended").catch(() => {});
     debug.releaseTab(tabId);
@@ -493,13 +512,6 @@ export default defineBackground(() => {
       "[browser-skill] chrome.notifications.onButtonClicked unavailable; borrow Allow/Deny buttons will be inactive",
     );
   }
-  attachSessionEventHandler({
-    manager: sessions,
-    transport,
-    cdp,
-    onSessionsChanged: onOverlaySessionStateChanged,
-  });
-
   // MV3 service worker keepalive + reconnect supervisor (review M4/M5
   // C3 + C4). Every 30s the alarm wakes the SW; if the transport is
   // not connected we force a fresh connect attempt so we never sit on
