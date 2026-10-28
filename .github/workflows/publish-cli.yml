@@ -27,6 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.collect.outputs.version }}
       tag: ${{ steps.collect.outputs.tag }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # The privileged publishing code always comes from the default branch.
       - uses: actions/checkout@v6
@@ -60,6 +61,7 @@ jobs:
         run: Compress-Archive -Path signed/bsk.exe -DestinationPath "dist/bsk-v$env:VERSION-x86_64-pc-windows-msvc.zip"
 
       - name: Upload verified release files
+        id: upload
         uses: actions/upload-artifact@v7
         with:
           name: verified-windows-${{ github.run_id }}-${{ github.run_attempt }}
@@ -73,6 +75,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
     timeout-minutes: 80
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -90,6 +94,7 @@ jobs:
           python3 scripts/macos-release.py "${args[@]}"
 
       - name: Upload independently verified Mac release files
+        id: upload
         uses: actions/upload-artifact@v7
         with:
           name: verified-macos-${{ github.run_id }}-${{ github.run_attempt }}
@@ -109,9 +114,12 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
+      # Partial reruns retain successful jobs and their outputs from earlier attempts.
       - uses: actions/download-artifact@v8
         with:
-          pattern: verified-*-${{ github.run_id }}-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.verify-windows.outputs.artifact_id }},${{ needs.verify-macos.outputs.artifact_id }}
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
           merge-multiple: true
 
       - name: Generate checksums from the final signed archives

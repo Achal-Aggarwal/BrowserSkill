@@ -1,10 +1,13 @@
 import importlib.util
+from contextlib import contextmanager
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, MagicMock
 import zipfile
@@ -38,7 +41,109 @@ def tar(data, name='bsk', kind=tarfile.REGTYPE):
     return stream.getvalue()
 
 
+@contextmanager
+def accepted_signing_workspace():
+    """Resume a saved submission; only Apple commands and credentials are faked."""
+    state = {'schema': 1, 'repository': mac.release.REPO, 'tag': 'cli-v1.2.3',
+             'commit': 'a' * 40, 'run_id': 123, 'run_attempt': 1,
+             'verification_only': False, 'targets': {}}
+    targets = {}
+    submission = '11111111-2222-3333-4444-555555555555'
+    previous = Path.cwd()
+    with tempfile.TemporaryDirectory() as directory:
+        try:
+            os.chdir(directory)
+            for index, target in enumerate(mac.TARGETS):
+                for kind in ('unsigned', 'signed'):
+                    path = Path(kind, target, 'bsk')
+                    path.parent.mkdir(parents=True)
+                    path.write_bytes(executable(target, signature=kind == 'signed'))
+                state['targets'][target] = {'artifact_id': index + 1,
+                                            'unsigned_sha256': mac.digest(executable(target))}
+                targets[target] = {**state['targets'][target],
+                                   'signed_sha256': mac.digest(executable(target, True)), 'cdhash': str(index) * 40}
+            mac.save_json('signing-state.json', state)
+            mac.save_json('notary-submission.json', {'id': submission, 'targets': targets})
+            log = {'jobId': submission, 'status': 'Accepted', 'statusCode': 0,
+                   'ticketContents': [{'arch': arch, 'cdhash': targets[t]['cdhash'],
+                                       'path': f'notarization.zip/{t}/bsk'}
+                                      for t, (_, arch) in mac.TARGETS.items()]}
+            downloads = 0
+
+            def command(argv):
+                nonlocal downloads
+                if argv[:3] == ['xcrun', 'notarytool', 'info']:
+                    return json.dumps({'status': 'Accepted'}), ''
+                if argv[:3] == ['xcrun', 'notarytool', 'log']:
+                    downloads += 1
+                    mac.save_json('notary-log.json', log)
+                    # Same Apple response, different filesystem time on every download.
+                    timestamp = 1700000000 + downloads * 60
+                    os.utime('notary-log.json', (timestamp, timestamp))
+                    return '', ''
+                raise AssertionError(f'Unexpected signing command: {argv[:3]}')
+
+            with patch.dict(os.environ, {'APPLE_ID': 'test', 'APPLE_PASSWORD': 'test', 'APPLE_TEAM_ID': mac.TEAM}), \
+                    patch.object(mac, 'command', side_effect=command), \
+                    patch.object(mac, 'verify_signature', side_effect=lambda path, **kw: targets[path.parent.name]['cdhash']):
+                yield state
+        finally:
+            os.chdir(previous)
+
+
 class MacReleaseTests(unittest.TestCase):
+    def test_completed_handoff_survives_full_retry_after_upload_or_archive_failure(self):
+        for lost_response in (False, True):
+            with self.subTest(lost_response=lost_response), accepted_signing_workspace() as state:
+                args = SimpleNamespace(timeout=1)
+                mac.sign(args)
+                bundle = Path('signed-macos.zip').read_bytes()
+                manifest = Path('macos-signing.json').read_bytes()
+                zip_name, json_name = mac.asset_names(state)
+                remote = {}
+                api = MagicMock()
+                api.release.return_value = {'id': 456, 'draft': True}
+                api.assets.side_effect = lambda draft: [
+                    {'name': mac.release.asset_names(state)[1], 'id': 'windows'},
+                    *({'name': name, 'id': name} for name in remote)]
+                api.request.side_effect = lambda path, **kw: remote[path.removeprefix('releases/assets/')]
+
+                def upload(draft, name, data):
+                    remote[name] = data
+                    if lost_response and name == json_name:
+                        raise TimeoutError('Upload succeeded but response was lost')
+
+                api.upload.side_effect = upload
+                with patch.object(mac, 'validate_state'):
+                    if lost_response:
+                        with self.assertRaises(TimeoutError):
+                            mac.return_signed(args, api)
+                    else:
+                        mac.return_signed(args, api)
+                    # A later archive failure or the lost upload response restarts the job.
+                    os.utime('notary-log.json', (1800000000, 1800000000))
+                    mac.sign(args)
+                    self.assertEqual(Path('signed-macos.zip').read_bytes(), bundle)
+                    self.assertEqual(Path('macos-signing.json').read_bytes(), manifest)
+                    mac.return_signed(args, api)
+                self.assertEqual(api.upload.call_count, 2)
+                self.assertEqual(remote[zip_name], bundle)
+                self.assertEqual(remote[json_name], manifest)
+
+    def test_completed_handoff_is_validated_before_reuse(self):
+        for corrupt in ('bundle', 'manifest'):
+            with self.subTest(corrupt=corrupt), accepted_signing_workspace():
+                args = SimpleNamespace(timeout=1)
+                mac.sign(args)
+                if corrupt == 'bundle':
+                    Path('signed-macos.zip').write_bytes(b'corrupted')
+                else:
+                    manifest = mac.read_json('macos-signing.json')
+                    manifest['submission_id'] = 'different-submission'
+                    mac.save_json('macos-signing.json', manifest)
+                with self.assertRaises(ValueError):
+                    mac.sign(args)
+
     def test_signature_can_be_added_or_replaced_without_changing_program(self):
         for target in mac.TARGETS:
             original, signed = executable(target), executable(target, True)

@@ -19,7 +19,9 @@ Developer ID private key never enter GitHub Actions.
 4. A ZIP containing both architectures is submitted using `notarytool`. Only
    `Accepted` is successful. Each executable's CodeDirectory hash must appear in
    Apple's ticket log. Retrying the same build attempt resumes its saved notary
-   submission and does not re-sign or resubmit the files.
+   submission and does not re-sign or resubmit the files. Once the handoff is
+   complete, retries revalidate and reuse the exact ZIP and manifest; refreshed
+   log timestamps cannot change an already uploaded bundle's identity.
 5. Windows creates the GitHub draft. Mac waits for that draft and its Windows
    completion marker, then uploads its signed bundle and completion manifest.
    Both handoffs include the source run and attempt; neither publishes the draft.
@@ -27,7 +29,9 @@ Developer ID private key never enter GitHub Actions.
    verifies the Developer ID certificate requirement, team, timestamp, runtime,
    embedded signature, online notarization and original program bytes. Only
    signature metadata, zero padding and required Mach-O header fields may change.
-7. Publishing waits for both jobs, checks that all platforms refer to the same
+7. Publishing waits for both jobs and downloads their output artifact IDs,
+   including a successful job retained from an earlier publishing attempt.
+   It checks that all platforms refer to the same
    build and draft, packages the signed bytes into the existing archive names,
    generates `version.json` from the final archives, removes staging assets and
    makes the release public. An unsigned Mac result cannot pass this gate.
@@ -88,13 +92,17 @@ trust or notarization.
 - Failed/invalid notarization: inspect Apple's log and fix the cause. Do not
   publish. If submission succeeded but the connection failed before its ID was
   saved, reconcile it with `notarytool history` on the internal node first.
-- GitHub build rerun: rerun **all** build jobs. Attempt IDs deliberately prevent
-  mixing stale artifacts. Start signing for the new attempt.
+- Source `Release CLI` build rerun: rerun **all** build jobs. Attempt IDs
+  deliberately prevent mixing stale source artifacts. Start signing for the new
+  source attempt.
 - Windows draft unavailable: recover Windows signing first, then retry the Mac
   return step. Only the Windows pipeline owns draft creation.
-- GitHub verification timeout: recover internal signing, then manually rerun
-  `Publish CLI` with the successful source run ID. Published releases are never
-  silently replaced.
+- GitHub verification timeout: recover internal signing, then use **Re-run failed
+  jobs** on `Publish CLI`, or manually dispatch it with the successful source run
+  ID. Partial publishing retries use each verification job's artifact ID, so a
+  successful platform need not run again. If its verified artifact has expired
+  (retained for seven days), rerun all `Publish CLI` jobs to verify both platforms
+  again. Published releases are never silently replaced.
 
 Apple references: [notarization overview](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
 [custom workflows](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow),

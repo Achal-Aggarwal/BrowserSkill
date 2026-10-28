@@ -245,12 +245,21 @@ def sign(args):
     for target in TARGETS:
         verify_signature(Path('signed', target, 'bsk'), notarized=True)
     manifest = {**state, 'targets': targets, 'submission_id': submission, 'notary_status': 'Accepted'}
-    with zipfile.ZipFile('signed-macos.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        for target in TARGETS:
-            archive.write(Path('signed', target, 'bsk'), f'{target}/bsk')
-        archive.write('notary-log.json')
-    manifest['bundle_sha256'] = digest(Path('signed-macos.zip').read_bytes())
-    save_json('macos-signing.json', manifest)
+    if Path('macos-signing.json').exists():
+        # The remote completion marker may already exist even if its upload response
+        # was lost. Preserve the exact ZIP bytes, including filesystem metadata.
+        completed = read_json('macos-signing.json')
+        require(completed == {**manifest, 'bundle_sha256': completed.get('bundle_sha256')},
+                'Completed Mac handoff no longer matches the verified signing result')
+        files = validate_bundle(state, completed, Path('signed-macos.zip').read_bytes())
+        Path('notary-log.json').write_bytes(files['notary-log.json'])
+    else:
+        with zipfile.ZipFile('signed-macos.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for target in TARGETS:
+                archive.write(Path('signed', target, 'bsk'), f'{target}/bsk')
+            archive.write('notary-log.json')
+        manifest['bundle_sha256'] = digest(Path('signed-macos.zip').read_bytes())
+        save_json('macos-signing.json', manifest)
     print('Both Mac executables passed signature, content and online notarization checks.', flush=True)
 
 
