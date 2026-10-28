@@ -119,8 +119,8 @@ export async function updateReadmes(data, directory = root) {
   return { count: contributors.length, changed };
 }
 
-// Used before pushing the dedicated maintenance branch. Refuse to overwrite
-// unrelated edits somebody may have added to an earlier automation PR.
+// Check a pending update or revision range before committing or reviewing it.
+// Refuse changes outside the marked contributor blocks.
 export function verifyContributorChanges(base = "HEAD", head, directory = root) {
   const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" });
   const names = git("diff", "--name-only", base, ...(head ? [head] : []), "--").trim();
