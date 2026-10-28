@@ -201,6 +201,52 @@ test("command adapter carries a run from process launch through oracle verificat
   });
 });
 
+test("command adapter keeps long run names valid for the event server", async () => {
+  await withServer(async (server, serverInfo) => {
+    const script = `
+      const [baseUrl, runId] = process.argv.slice(1);
+      const response = await fetch(baseUrl + "/api/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId, type: "completed" }),
+      });
+      if (response.status !== 202) process.exitCode = 1;
+    `;
+    const task = {
+      ...getTask("navigation-history", cases),
+      id: "long-case-name-".repeat(4),
+      siteAssertions: [{ label: "completion", type: "completed", minCount: 1 }],
+      responseAssertions: [],
+      adapterAssertions: [],
+    };
+    const options = {
+      server,
+      serverInfo,
+      task,
+      adapter: {
+        command: process.execPath,
+        args: ["--input-type=module", "-e", script, "{baseUrl}", "{runId}"],
+        variant: "long-variant-name-".repeat(4),
+      },
+      adapterName: "long-agent-name-".repeat(4),
+      configDirectory: process.cwd(),
+      iteration: 123,
+      locale: "en",
+      timeoutMs: 5_000,
+    };
+    const first = await runCommandTask(options);
+    const second = await runCommandTask(options);
+    for (const result of [first, second]) {
+      assert.equal(result.execution.exitCode, 0);
+      assert.match(result.runId, /^[A-Za-z0-9._-]{1,120}$/);
+      assert.match(result.runId, /-123-[a-f0-9]{8}$/);
+      assert.equal(result.verification.status, "passed");
+      assert.equal(result.eventCount, 1);
+    }
+    assert.notEqual(first.runId, second.runId);
+  });
+});
+
 test("report summary keeps partial verification distinct from full verification", () => {
   const rows = summarizeReports([
     {
