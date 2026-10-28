@@ -25,6 +25,7 @@ vi.mock("@/lib/audit");
 vi.mock("@/lib/audit-bridge");
 vi.mock("@/lib/connection-controller");
 vi.mock("@/lib/daemon-connection-preference");
+vi.mock("@/lib/daemon-upgrade-notice");
 vi.mock("@/lib/heartbeat");
 vi.mock("@/lib/instance-id");
 vi.mock("@/lib/interaction-preferences");
