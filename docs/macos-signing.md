@@ -57,6 +57,10 @@ filter `cli-v*`, and publish the configuration. Add the trigger after YAML impor
 this BK-CI deployment can drop CREATE events on UI-to-YAML conversion. The helper
 also rejects branch events and validates the actual release tag.
 
+The job uses a mutex group to keep concurrent builds from sharing a signing
+workspace. Select the actual node in the UI; a display label including an IP
+address or status suffix is not its YAML node alias.
+
 The Mac node needs Python 3, curl, codesign, Xcode command-line tools with
 notarytool, and network access to GitHub and Apple's notarization services. It
 only signs downloaded build inputs; it does not execute code from the tag or

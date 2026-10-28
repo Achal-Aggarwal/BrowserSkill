@@ -32,6 +32,8 @@ stages:
   jobs:
     sign_macos:
       name: Mac Developer ID signing and Apple notarization
+      mutex:
+        label: BrowserSkill_macos_signing
       runs-on:
         self-hosted: true
         node-name: MAC_SIGNING_NODE
