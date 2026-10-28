@@ -32,10 +32,15 @@
 
 ## 看看实际效果
 
+<details>
+<summary><strong>▶ 观看演示 · 81 秒 · 中文版</strong><br /><picture><img src="docs/assets/demo/browserskill-demo-zh-CN.png" alt="BrowserSkill 演示预览 — 你的 Agent，你的浏览器，一次连接。" width="960" /></picture></summary>
+
 https://github.com/user-attachments/assets/959cb520-80ba-4b9e-b6d8-d94523b03693
 
+</details>
+
 <p align="center">
-  <a href="https://github.com/user-attachments/assets/959cb520-80ba-4b9e-b6d8-d94523b03693"><strong>▶ 观看演示 · 81 秒 · 中文版</strong></a> · <a href="docs/assets/demo/browserskill-demo-zh-CN.mp4">下载 MP4</a><br />
+  点击封面展开播放 · <a href="docs/assets/demo/browserskill-demo-zh-CN.mp4">下载 MP4</a><br />
   基于 main 版本，在本地演示网站中录制的真实浏览器操作。
 </p>
 
@@ -43,16 +48,20 @@ https://github.com/user-attachments/assets/959cb520-80ba-4b9e-b6d8-d94523b03693
 
 <table align="center">
   <tr>
-    <td align="center" width="120"><img src="docs/assets/harnesses/codex.svg" alt="Codex" width="42" height="42" /><br /><strong>Codex</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/claude.svg" alt="Claude Code" width="42" height="42" /><br /><strong>Claude Code</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/cursor.svg" alt="Cursor" width="42" height="42" /><br /><strong>Cursor</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/openclaw.svg" alt="OpenClaw" width="42" height="42" /><br /><strong>OpenClaw</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/codebuddy.svg" alt="CodeBuddy" width="42" height="42" /><br /><strong>CodeBuddy</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/workbuddy.svg" alt="WorkBuddy" width="42" height="42" /><br /><strong>WorkBuddy</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/codex.svg" alt="Codex" width="42" height="42" /><br /><strong>Codex</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/claude.svg" alt="Claude Code" width="42" height="42" /><br /><strong>Claude Code</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/cursor.svg" alt="Cursor" width="42" height="42" /><br /><strong>Cursor</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/openclaw.svg" alt="OpenClaw" width="42" height="42" /><br /><strong>OpenClaw</strong></td>
+  </tr>
+  <tr>
+    <td align="center" width="180"><img src="docs/assets/harnesses/codebuddy.svg" alt="CodeBuddy" width="42" height="42" /><br /><strong>CodeBuddy</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/workbuddy.svg" alt="WorkBuddy" width="42" height="42" /><br /><strong>WorkBuddy</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/pi.svg" alt="Pi" width="42" height="42" /><br /><strong>Pi</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/hermes.png" alt="Hermes Agent" width="42" height="42" /><br /><strong>Hermes Agent</strong></td>
   </tr>
 </table>
 
-这些 Agent，以及 Pi、Hermes Agent 等能调用 Shell 的 Agent，都可以通过同一套 **`bsk` CLI** 使用。**[DeepSeek Harness](#deepseek-harness-插件)** 还提供专用插件，直接使用浏览器工具并查看任务预览。Agent 和模型由你选择，BrowserSkill 负责连接浏览器。
+这些 Agent，以及其他能调用 Shell 的 Agent，都可以通过同一套 **`bsk` CLI** 使用。**[DeepSeek Harness](#deepseek-harness-插件)** 还提供专用插件，直接使用浏览器工具并查看任务预览。Agent 和模型由你选择，BrowserSkill 负责连接浏览器。
 
 ## 能做什么
 

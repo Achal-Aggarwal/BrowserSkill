@@ -32,10 +32,15 @@
 
 ## See it in action
 
+<details>
+<summary><strong>▶ Watch the demo · 81 seconds · English</strong><br /><picture><img src="docs/assets/demo/browserskill-demo-en.png" alt="BrowserSkill demo preview — Your agent. Your browser. One connection." width="960" /></picture></summary>
+
 https://github.com/user-attachments/assets/6111d978-baa6-4a76-92c4-4f51d47ae617
 
+</details>
+
 <p align="center">
-  <a href="https://github.com/user-attachments/assets/6111d978-baa6-4a76-92c4-4f51d47ae617"><strong>▶ Watch the demo · 81 seconds · English</strong></a> · <a href="docs/assets/demo/browserskill-demo-en.mp4">Download MP4</a><br />
+  Click the cover to expand the video · <a href="docs/assets/demo/browserskill-demo-en.mp4">Download MP4</a><br />
   Real browser actions on a local demo workspace, recorded from main.
 </p>
 
@@ -43,16 +48,20 @@ https://github.com/user-attachments/assets/6111d978-baa6-4a76-92c4-4f51d47ae617
 
 <table align="center">
   <tr>
-    <td align="center" width="120"><img src="docs/assets/harnesses/codex.svg" alt="Codex" width="42" height="42" /><br /><strong>Codex</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/claude.svg" alt="Claude Code" width="42" height="42" /><br /><strong>Claude Code</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/cursor.svg" alt="Cursor" width="42" height="42" /><br /><strong>Cursor</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/openclaw.svg" alt="OpenClaw" width="42" height="42" /><br /><strong>OpenClaw</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/codebuddy.svg" alt="CodeBuddy" width="42" height="42" /><br /><strong>CodeBuddy</strong></td>
-    <td align="center" width="120"><img src="docs/assets/harnesses/workbuddy.svg" alt="WorkBuddy" width="42" height="42" /><br /><strong>WorkBuddy</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/codex.svg" alt="Codex" width="42" height="42" /><br /><strong>Codex</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/claude.svg" alt="Claude Code" width="42" height="42" /><br /><strong>Claude Code</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/cursor.svg" alt="Cursor" width="42" height="42" /><br /><strong>Cursor</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/openclaw.svg" alt="OpenClaw" width="42" height="42" /><br /><strong>OpenClaw</strong></td>
+  </tr>
+  <tr>
+    <td align="center" width="180"><img src="docs/assets/harnesses/codebuddy.svg" alt="CodeBuddy" width="42" height="42" /><br /><strong>CodeBuddy</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/workbuddy.svg" alt="WorkBuddy" width="42" height="42" /><br /><strong>WorkBuddy</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/pi.svg" alt="Pi" width="42" height="42" /><br /><strong>Pi</strong></td>
+    <td align="center" width="180"><img src="docs/assets/harnesses/hermes.png" alt="Hermes Agent" width="42" height="42" /><br /><strong>Hermes Agent</strong></td>
   </tr>
 </table>
 
-These agents, Pi, Hermes Agent, and other agents that can run shell commands use the same **`bsk` CLI**. **[DeepSeek Harness](#deepseek-harness-plugin)** has a dedicated plugin with native browser tools and task previews. You choose the agent and model; BrowserSkill connects it to your browser.
+These and other agents that can run shell commands use the same **`bsk` CLI**. **[DeepSeek Harness](#deepseek-harness-plugin)** has a dedicated plugin with native browser tools and task previews. You choose the agent and model; BrowserSkill connects it to your browser.
 
 ## What you can do
 
