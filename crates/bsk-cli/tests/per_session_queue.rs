@@ -963,6 +963,120 @@ async fn native_input_retains_terminal_reason_after_user_moves_tab() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_outer_timeout_preserves_terminal_reason_without_extending_wait() {
+    let (handle, _sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = handshake_as_ext(&mut ws).await;
+    let state = handle.state();
+    let browser_id = bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into());
+    for end_session in [false, true] {
+        let sid = state
+            .sessions
+            .reserve_id(browser_id.clone(), 8, || 0)
+            .unwrap();
+        state.tool_queues.spawn(sid.clone());
+        let guard = state
+            .tool_inflight
+            .register("snapshot".into(), sid.clone())
+            .unwrap();
+        let task = {
+            let queues = Arc::clone(&state.tool_queues);
+            let sid = sid.clone();
+            let inflight = guard.entry();
+            tokio::spawn(async move {
+                queues
+                    .dispatch(
+                        &sid,
+                        Method::ToolSnapshot,
+                        json!({"session_id": sid.0, "tab_id": 42}),
+                        Duration::from_millis(1500),
+                        Some(inflight),
+                    )
+                    .await
+            })
+        };
+        let request = next_request(&mut ws).await;
+        assert_eq!(request.method, Method::ToolSnapshot);
+        // Cancellation at 1.2s pushes worker cleanup to ~3.2s, past the
+        // ordinary outer dispatch deadline of 1.5s + 1s.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert!(
+            !task.is_finished(),
+            "cancel must precede the worker's deadline"
+        );
+        if end_session {
+            end_session_after_tab_move(&mut ws, &sid.0, &request.id).await;
+        } else {
+            ws.send(Message::Text(
+                json!({
+                    "event": "session.user_interrupt",
+                    "payload": {"session_id": sid.0},
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+            let cancel = next_request(&mut ws).await;
+            assert_eq!(cancel.method, Method::Cancel);
+            assert_eq!(cancel.params.unwrap()["rpc_id"], request.id);
+        }
+        let error = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err()
+            .into_rpc();
+        assert_eq!(error.code, ErrorCode::Timeout);
+        assert_eq!(error.message, "tool dispatch timed out");
+        // An outstanding extension waiter proves dispatch returned before
+        // worker cleanup. Resolve it now instead of using a narrow elapsed bound.
+        assert!(
+            state
+                .browsers
+                .get(&browser_id)
+                .unwrap()
+                .pending
+                .lock()
+                .unwrap()
+                .resolve(ResponseFrame {
+                    id: request.id,
+                    body: ResponseBody::Err(bsk_protocol::RpcError {
+                        code: ErrorCode::Cancelled,
+                        message: "snapshot cleanup completed".into(),
+                        data: None,
+                    }),
+                }),
+            "the outer timeout must not wait for the worker's cleanup deadline"
+        );
+        let rendered = bsk::cli::render_error::info_for_error(error.code, error.data.as_ref());
+        if end_session {
+            assert_eq!(
+                error.data,
+                Some(json!({"reason": bsk::rpc_reason::SESSION_USER_MOVED_TAB}))
+            );
+            assert!(
+                rendered
+                    .hint
+                    .unwrap()
+                    .contains("this session cannot resume")
+            );
+            assert_eq!(
+                state.sessions.end_info(&sid).unwrap().reason,
+                "user_moved_tab"
+            );
+            assert!(state.sessions.get(&sid).is_none());
+        } else {
+            assert!(error.data.is_none());
+            assert!(!rendered.hint.unwrap_or_default().contains("cannot resume"));
+            assert!(state.sessions.end_info(&sid).is_none());
+            assert!(state.sessions.get(&sid).is_some());
+        }
+    }
+    drop(ws);
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn evaluate_cleanup_timeout_preserves_session_termination() {
     let (handle, _sock) = spawn_daemon().await;
     let mut ws = connect_ext(handle.ws_addr()).await;

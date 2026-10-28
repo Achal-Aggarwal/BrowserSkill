@@ -141,6 +141,25 @@ pub enum DispatchError {
 }
 
 impl DispatchError {
+    fn with_session_end_reason(self, entry: Option<&ToolInflightEntry>) -> Self {
+        if entry.and_then(ToolInflightEntry::cancel_reason)
+            != Some(super::inflight::CancelReason::UserMovedTab)
+        {
+            return self;
+        }
+        // Apply the terminal cause when returning to the caller, including when
+        // the outer wait expires before the worker finishes cancellation cleanup.
+        let mut error = self.into_rpc();
+        let data = error.data.get_or_insert_with(|| serde_json::json!({}));
+        if data.is_null() {
+            *data = serde_json::json!({});
+        } else if !data.is_object() {
+            *data = serde_json::json!({ "details": data.take() });
+        }
+        data["reason"] = serde_json::json!(crate::rpc_reason::SESSION_USER_MOVED_TAB);
+        Self::Rpc(error)
+    }
+
     /// Convert this dispatch outcome into a structured [`RpcError`]
     /// suitable for sending back over the IPC line.
     pub fn into_rpc(self) -> RpcError {
@@ -370,7 +389,7 @@ impl ToolQueueRegistry {
             params,
             timeout,
             false,
-            inflight,
+            inflight.clone(),
             None,
             CANCEL_CLEANUP_TIMEOUT,
         )
@@ -380,7 +399,7 @@ impl ToolQueueRegistry {
         // while it is running, session.stop observes SessionBusy and retries
         // on a later sweep rather than interrupting the tool.
         self.sessions.touch(sid);
-        outcome
+        outcome.map_err(|error| error.with_session_end_reason(inflight.as_deref()))
     }
 
     pub fn activity(&self, sid: &SessionId) -> Result<DebugActivity, DispatchError> {
@@ -462,10 +481,11 @@ impl ToolQueueRegistry {
             cancel_cleanup_timeout: CANCEL_CLEANUP_TIMEOUT,
             session_id: sid.clone(),
         };
-        match forward_one(sid, &self.browsers, &self.sessions, &job).await {
-            Ok(v) => Ok(v),
-            Err(err) => Err(DispatchError::Rpc(err)),
-        }
+        forward_one(sid, &self.browsers, &self.sessions, &job)
+            .await
+            .map_err(|error| {
+                DispatchError::Rpc(error).with_session_end_reason(job.inflight.as_deref())
+            })
     }
 
     /// Stop accepting new jobs for `sid`, enqueue one final control RPC,
@@ -612,35 +632,6 @@ async fn run_worker(
 /// Forward a single [`ToolJob`] over WS to the extension that owns the
 /// session and decode the structured response.
 async fn forward_one(
-    sid: &SessionId,
-    browsers: &Arc<BrowserRegistry>,
-    sessions: &Arc<SessionRegistry>,
-    job: &ToolJob,
-) -> Result<Value, RpcError> {
-    forward_to_extension(sid, browsers, sessions, job)
-        .await
-        .map_err(|mut error| {
-            // Session termination outlives any tool or cleanup failure. Apply it
-            // after method-specific error shaping so effects and diagnostics survive.
-            if job
-                .inflight
-                .as_deref()
-                .and_then(ToolInflightEntry::cancel_reason)
-                == Some(super::inflight::CancelReason::UserMovedTab)
-            {
-                let data = error.data.get_or_insert_with(|| serde_json::json!({}));
-                if data.is_null() {
-                    *data = serde_json::json!({});
-                } else if !data.is_object() {
-                    *data = serde_json::json!({ "details": data.take() });
-                }
-                data["reason"] = serde_json::json!(crate::rpc_reason::SESSION_USER_MOVED_TAB);
-            }
-            error
-        })
-}
-
-async fn forward_to_extension(
     sid: &SessionId,
     browsers: &Arc<BrowserRegistry>,
     sessions: &Arc<SessionRegistry>,
