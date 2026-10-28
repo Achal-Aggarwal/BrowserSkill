@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { runCommandTask } from "../lib/agent-runner.mjs";
 import { loadCaseManifests, validateCaseManifest } from "../lib/case-loader.mjs";
@@ -320,6 +321,34 @@ test("badcase scaffold creates a loadable, escaped, self-contained case", async 
     });
     assert.match(html, /Quoted `title` \$\{notCode\} &lt;unsafe&gt;/);
     assert.match(await readFile(result.files.readme, "utf8"), /issue-123/);
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("badcase scaffold escapes URL characters in relative fixture imports", async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "browser-eval-import-"));
+  try {
+    const directoryNames = ["checkout#fragment", "checkout%20literal"];
+    if (process.platform !== "win32") directoryNames.push("checkout?query");
+    for (const directoryName of directoryNames) {
+      const helpers = join(temporaryRoot, directoryName, "lib");
+      await mkdir(helpers, { recursive: true });
+      for (const name of ["scaffold-case.mjs", "paths.mjs", "fixtures.mjs"]) {
+        await copyFile(new URL(`../lib/${name}`, import.meta.url), join(helpers, name));
+      }
+      const { scaffoldCase: scaffold } = await import(
+        pathToFileURL(join(helpers, "scaffold-case.mjs")).href
+      );
+      const result = await scaffold({
+        id: "escaped-import",
+        rootCasesDirectory: join(temporaryRoot, `cases-${directoryName}`),
+      });
+      const source = await readFile(result.files.fixture, "utf8");
+      assert.match(source, /from "\.\.\//);
+      const { default: fixture } = await import(pathToFileURL(result.files.fixture).href);
+      assert.match(fixture.render(), /CASE-ESCAPED_IMPORT/);
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
