@@ -163,21 +163,27 @@ async function moveExpectedTab(
   properties: chrome.tabs.MoveProperties,
   signal?: AbortSignal,
   isLive?: () => boolean,
+  mutate?: CdpRunner["runBrowserMutation"],
 ): Promise<chrome.tabs.Tab | chrome.tabs.Tab[]> {
   const current = await tabs.get(tabId);
-  if (signal?.aborted || isLive?.() === false) {
-    const error = new Error("Tab move aborted before browser mutation");
-    error.name = "AbortError";
-    throw error;
-  }
-  return expectedTabMoves.run(
-    {
-      tabId,
-      fromWindowId: current.windowId,
-      toWindowId: properties.windowId ?? current.windowId,
-    },
-    () => tabs.move(tabId, properties),
-  );
+  const move = () => {
+    if (signal?.aborted || isLive?.() === false) {
+      const error = new Error("Tab move aborted before browser mutation");
+      error.name = "AbortError";
+      throw error;
+    }
+    return expectedTabMoves.run(
+      {
+        tabId,
+        fromWindowId: current.windowId,
+        toWindowId: properties.windowId ?? current.windowId,
+      },
+      () => tabs.move(tabId, properties),
+    );
+  };
+  // Finish browser reads before the final authority check. Registration and
+  // native dispatch must then run together without another asynchronous gap.
+  return mutate ? mutate(move) : move();
 }
 
 /**
@@ -875,9 +881,14 @@ async function moveTabForBorrow(
   mutate?: CdpRunner["runBrowserMutation"],
 ): Promise<RpcError | null> {
   try {
-    const move = () =>
-      moveExpectedTab(tabsApi, tabId, { windowId: agentWindowId, index: -1 }, signal, isLive);
-    await (mutate ? mutate(move) : move());
+    await moveExpectedTab(
+      tabsApi,
+      tabId,
+      { windowId: agentWindowId, index: -1 },
+      signal,
+      isLive,
+      mutate,
+    );
   } catch (err) {
     const cancelled = aborted(signal, "tab_borrow", isLive);
     if (cancelled) return cancelled;
@@ -1348,14 +1359,13 @@ async function returnBorrowedTabCore(
   }
 
   try {
-    const moved = await mutateBrowser(deps, () =>
-      moveExpectedTab(
-        tabsApi,
-        tabId,
-        { windowId: targetWindowId, index: targetIndex },
-        deps.signal,
-        deps.isSessionLive,
-      ),
+    const moved = await moveExpectedTab(
+      tabsApi,
+      tabId,
+      { windowId: targetWindowId, index: targetIndex },
+      deps.signal,
+      deps.isSessionLive,
+      deps.cdp?.runBrowserMutation,
     );
     const movedTab = Array.isArray(moved) ? moved[0] : moved;
     const finalIndex = typeof movedTab?.index === "number" ? movedTab.index : targetIndex;
@@ -1404,14 +1414,13 @@ async function returnBorrowedTabCore(
         return cleanupError ?? cancelledBeforeFallbackMove;
       }
       try {
-        const moved = await mutateBrowser(deps, () =>
-          moveExpectedTab(
-            tabsApi,
-            tabId,
-            { windowId: target.windowId, index: target.index },
-            deps.signal,
-            deps.isSessionLive,
-          ),
+        const moved = await moveExpectedTab(
+          tabsApi,
+          tabId,
+          { windowId: target.windowId, index: target.index },
+          deps.signal,
+          deps.isSessionLive,
+          deps.cdp?.runBrowserMutation,
         );
         const movedTab = Array.isArray(moved) ? moved[0] : moved;
         const finalIndex = typeof movedTab?.index === "number" ? movedTab.index : target.index;

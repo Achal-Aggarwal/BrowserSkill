@@ -28,6 +28,7 @@ export interface SessionEventHandlerOptions {
   onSessionReleased?: (session: SessionContext) => void;
   cdp?: {
     detachSession(sessionId: string): Promise<void>;
+    releaseSessionTab?(sessionId: string, tabId: number): Promise<void>;
   };
   /**
    * Invoked after a user-closed Agent Window has been removed from the
@@ -99,6 +100,12 @@ export function attachSessionEventHandler(options: SessionEventHandlerOptions): 
       for (const id of ownedTabs) {
         void reset.resetAgentOverlays(id, ctx.sessionId).catch((error) => {
           console.debug("[bsk] released tab overlay reset failed", error);
+        });
+        // A first reader can still be attaching before it records its CDP
+        // owner. Release the known task pages too, using the driver's pending
+        // attachment fence and its protection for another session's owner.
+        void options.cdp?.releaseSessionTab?.(ctx.sessionId, id).catch((error) => {
+          console.debug("[bsk] released tab CDP cleanup failed", error);
         });
       }
       void options.cdp?.detachSession(ctx.sessionId).catch((error) => {

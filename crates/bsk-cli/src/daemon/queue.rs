@@ -789,7 +789,14 @@ async fn forward_one(
                     job.inflight.as_deref(),
                     "tool dispatch cancelled after extension cleanup",
                 );
-                error.data = Some(input_effect_data(Some(&resp.body)));
+                let mut data = input_effect_data(Some(&resp.body));
+                // Keep session termination alongside input effects and cleanup diagnostics.
+                if let (Some(Value::Object(cancel_data)), Value::Object(effect_data)) =
+                    (error.data.take(), &mut data)
+                {
+                    effect_data.extend(cancel_data);
+                }
+                error.data = Some(data);
                 return Err(error);
             }
             // File transfer commits are irreversible. A late cancel cannot

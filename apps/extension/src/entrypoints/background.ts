@@ -97,7 +97,10 @@ export default defineBackground(() => {
   attachSessionEventHandler({
     manager: sessions,
     transport,
-    cdp: { detachSession: (id) => cdp.detachSession(id) },
+    cdp: {
+      detachSession: (id) => cdp.detachSession(id),
+      releaseSessionTab: (id, tabId) => cdp.releaseSessionTab(id, tabId),
+    },
     onSessionReleased: (ctx) => {
       dispatcher.cancelSession(ctx.sessionId);
       cooperation.release(ctx.sessionId);

@@ -176,18 +176,13 @@ describe("tab tool move registration", () => {
   it.each([
     "borrow",
     "return",
-  ] as const)("does not move a tab when %s is cancelled during its source lookup", async (kind) => {
+  ] as const)("does not move a tab when %s is cancelled before native dispatch", async (kind) => {
     const f = await toolFixture();
     const abort = new AbortController();
-    let mutating = false;
     if (kind === "return") {
       f.tab.windowId = 10;
       f.task.borrowedTabs.set(7, { tabId: 7, originalWindowId: 20, originalIndex: 3 });
     }
-    f.deps.tabs.get = async () => {
-      if (mutating) abort.abort();
-      return { ...f.tab };
-    };
     const handler = kind === "borrow" ? handleTabBorrow : handleTabReturn;
     expect(
       await handler(
@@ -198,7 +193,7 @@ describe("tab tool move registration", () => {
           signal: abort.signal,
           cdp: {
             runBrowserMutation: async (operation) => {
-              mutating = true;
+              abort.abort();
               return operation();
             },
           },

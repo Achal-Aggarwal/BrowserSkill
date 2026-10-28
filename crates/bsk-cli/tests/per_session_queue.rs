@@ -810,6 +810,115 @@ async fn native_input_effect_survives_deadline_and_user_cancellation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_input_retains_terminal_reason_after_user_moves_tab() {
+    async fn next_request(ws: &mut Ws) -> RequestFrame {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Message::Text(text) = ws.next().await.unwrap().unwrap()
+                    && let Frame::Request(request) = serde_json::from_str(&text).unwrap()
+                {
+                    return request;
+                }
+            }
+        })
+        .await
+        .expect("expected a request from the daemon")
+    }
+
+    let (handle, _sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = handshake_as_ext(&mut ws).await;
+    let state = handle.state();
+    for method in [Method::ToolClick, Method::ToolPress, Method::ToolWheel] {
+        for effect in ["none", "unknown"] {
+            let sid = state
+                .sessions
+                .reserve_id(
+                    bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
+                    8,
+                    || 0,
+                )
+                .unwrap();
+            state.tool_queues.spawn(sid.clone());
+            let guard = state
+                .tool_inflight
+                .register("input".into(), sid.clone())
+                .unwrap();
+            let task = {
+                let queues = Arc::clone(&state.tool_queues);
+                let sid = sid.clone();
+                let method = method.clone();
+                let inflight = guard.entry();
+                tokio::spawn(async move {
+                    queues
+                        .dispatch(
+                            &sid,
+                            method,
+                            json!({"session_id": sid.0, "tab_id": 42}),
+                            Duration::from_secs(5),
+                            Some(inflight),
+                        )
+                        .await
+                })
+            };
+            let request = next_request(&mut ws).await;
+            assert_eq!(request.method, method);
+            ws.send(Message::Text(
+                json!({
+                    "event": "session.ended",
+                    "payload": {"session_id": sid.0, "reason": "user_moved_tab", "tab_id": 42},
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+            let cancel = next_request(&mut ws).await;
+            assert_eq!(cancel.method, Method::Cancel);
+            assert_eq!(cancel.params.unwrap()["rpc_id"], request.id);
+            let mut data = json!({"effect_state": effect, "cleanup_error": "focus cleanup failed"});
+            if effect == "unknown" {
+                data["reason"] = json!("input_outcome_unknown");
+            }
+            ws.send(Message::Text(
+                serde_json::to_string(&ResponseFrame {
+                    id: request.id,
+                    body: ResponseBody::Err(bsk_protocol::RpcError {
+                        code: ErrorCode::Cancelled,
+                        message: "input aborted".into(),
+                        data: Some(data.clone()),
+                    }),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+            let error = tokio::time::timeout(Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err()
+                .into_rpc();
+            assert_eq!(error.code, ErrorCode::UserAborted);
+            data["reason"] = json!(bsk::rpc_reason::SESSION_USER_MOVED_TAB);
+            assert_eq!(error.data, Some(data), "{method:?}, effect={effect}");
+            let rendered = bsk::cli::render_error::info_for_error(error.code, error.data.as_ref());
+            assert!(
+                rendered
+                    .hint
+                    .unwrap()
+                    .contains("this session cannot resume")
+            );
+            assert_eq!(
+                state.sessions.end_info(&sid).unwrap().reason,
+                "user_moved_tab"
+            );
+        }
+    }
+    drop(ws);
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_page_screenshot_deadline_keeps_the_session_busy_until_page_cleanup() {
     assert_deadline_waits_for_cleanup(
         Method::ToolScreenshotFullPage,
