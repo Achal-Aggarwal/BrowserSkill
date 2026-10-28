@@ -303,15 +303,16 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             ),
             exit_code: base.exit_code,
         },
-        (ErrorCode::NotFound | ErrorCode::UserAborted, reason::SESSION_USER_MOVED_TAB) => {
-            RenderInfo {
-                summary: "the session ended because the user moved a controlled tab out of its Agent Window",
-                hint: Some(
-                    "all pages were preserved and browser control ended; this session cannot resume. Ask the user before starting a new session or borrowing a page again",
-                ),
-                exit_code: base.exit_code,
-            }
-        }
+        (
+            ErrorCode::NotFound | ErrorCode::UserAborted | ErrorCode::Timeout,
+            reason::SESSION_USER_MOVED_TAB,
+        ) => RenderInfo {
+            summary: "the session ended because the user moved a controlled tab out of its Agent Window",
+            hint: Some(
+                "all pages were preserved and browser control ended; this session cannot resume. Ask the user before starting a new session or borrowing a page again",
+            ),
+            exit_code: base.exit_code,
+        },
         (ErrorCode::NotFound, reason::SESSION_WINDOW_CLOSED) => RenderInfo {
             summary: "the session ended because the user closed the Agent Window",
             hint: Some(
@@ -1105,7 +1106,11 @@ mod tests {
     /// `invalid_params` defaults.
     #[test]
     fn user_moved_tab_is_terminal_for_running_and_later_commands() {
-        for code in [ErrorCode::UserAborted, ErrorCode::NotFound] {
+        for code in [
+            ErrorCode::UserAborted,
+            ErrorCode::NotFound,
+            ErrorCode::Timeout,
+        ] {
             let rendered = info_for_error(
                 code,
                 Some(&serde_json::json!({"reason": crate::rpc_reason::SESSION_USER_MOVED_TAB})),

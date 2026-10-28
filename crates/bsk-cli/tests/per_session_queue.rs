@@ -830,7 +830,16 @@ async fn native_input_retains_terminal_reason_after_user_moves_tab() {
     let _ = handshake_as_ext(&mut ws).await;
     let state = handle.state();
     for method in [Method::ToolClick, Method::ToolPress, Method::ToolWheel] {
-        for effect in ["none", "unknown"] {
+        for (deadline_first, cleanup_effect) in [
+            (false, Some("none")),
+            (false, Some("unknown")),
+            (false, None),
+            (true, Some("none")),
+            (true, None),
+        ] {
+            if deadline_first && method != Method::ToolClick {
+                continue;
+            }
             let sid = state
                 .sessions
                 .reserve_id(
@@ -855,7 +864,7 @@ async fn native_input_retains_terminal_reason_after_user_moves_tab() {
                             &sid,
                             method,
                             json!({"session_id": sid.0, "tab_id": 42}),
-                            Duration::from_secs(5),
+                            Duration::from_millis(if deadline_first { 20 } else { 5000 }),
                             Some(inflight),
                         )
                         .await
@@ -863,6 +872,12 @@ async fn native_input_retains_terminal_reason_after_user_moves_tab() {
             };
             let request = next_request(&mut ws).await;
             assert_eq!(request.method, method);
+            if deadline_first {
+                let cancel = next_request(&mut ws).await;
+                assert_eq!(cancel.method, Method::Cancel);
+                assert_eq!(cancel.id, format!("deadline-cancel-{}", request.id));
+                assert_eq!(guard.entry().cancel_reason(), None);
+            }
             ws.send(Message::Text(
                 json!({
                     "event": "session.ended",
@@ -875,32 +890,57 @@ async fn native_input_retains_terminal_reason_after_user_moves_tab() {
             let cancel = next_request(&mut ws).await;
             assert_eq!(cancel.method, Method::Cancel);
             assert_eq!(cancel.params.unwrap()["rpc_id"], request.id);
-            let mut data = json!({"effect_state": effect, "cleanup_error": "focus cleanup failed"});
-            if effect == "unknown" {
-                data["reason"] = json!("input_outcome_unknown");
+            let mut data = json!({"effect_state": cleanup_effect.unwrap_or("unknown")});
+            if let Some(effect) = cleanup_effect {
+                data["cleanup_error"] = json!("focus cleanup failed");
+                if effect == "unknown" {
+                    data["reason"] = json!("input_outcome_unknown");
+                }
+                ws.send(Message::Text(
+                    serde_json::to_string(&ResponseFrame {
+                        id: request.id,
+                        body: ResponseBody::Err(bsk_protocol::RpcError {
+                            code: ErrorCode::Cancelled,
+                            message: "input aborted".into(),
+                            data: Some(data.clone()),
+                        }),
+                    })
+                    .unwrap(),
+                ))
+                .await
+                .unwrap();
             }
-            ws.send(Message::Text(
-                serde_json::to_string(&ResponseFrame {
-                    id: request.id,
-                    body: ResponseBody::Err(bsk_protocol::RpcError {
-                        code: ErrorCode::Cancelled,
-                        message: "input aborted".into(),
-                        data: Some(data.clone()),
-                    }),
-                })
-                .unwrap(),
-            ))
-            .await
-            .unwrap();
-            let error = tokio::time::timeout(Duration::from_secs(2), task)
+            let error = tokio::time::timeout(Duration::from_secs(4), task)
                 .await
                 .unwrap()
                 .unwrap()
                 .unwrap_err()
                 .into_rpc();
-            assert_eq!(error.code, ErrorCode::UserAborted);
+            if deadline_first {
+                assert_eq!(error.code, ErrorCode::Timeout);
+                assert_eq!(
+                    error.message,
+                    if cleanup_effect.is_some() {
+                        "tool RPC timed out after 20ms"
+                    } else {
+                        "input timed out and extension cleanup could not be confirmed"
+                    }
+                );
+            } else if cleanup_effect.is_some() {
+                assert_eq!(error.code, ErrorCode::UserAborted);
+            } else {
+                assert_eq!(error.code, ErrorCode::Timeout);
+                assert_eq!(
+                    error.message,
+                    "cancelled tool did not finish cleanup within 2s"
+                );
+            }
             data["reason"] = json!(bsk::rpc_reason::SESSION_USER_MOVED_TAB);
-            assert_eq!(error.data, Some(data), "{method:?}, effect={effect}");
+            assert_eq!(
+                error.data,
+                Some(data),
+                "{method:?}, deadline_first={deadline_first}, cleanup_effect={cleanup_effect:?}"
+            );
             let rendered = bsk::cli::render_error::info_for_error(error.code, error.data.as_ref());
             assert!(
                 rendered

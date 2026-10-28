@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CdpDebuggerApi, ChromiumCdp } from "@/browser-driver/chromium-cdp";
 import { CooperationController } from "@/cooperation/controller";
 import { handleConsole } from "@/tools/console";
+import { handleSnapshot } from "@/tools/observation";
 import { attachSessionEventHandler } from "../event-handler";
 import { SessionManager } from "../manager";
 import { expectedTabMoves } from "../tab-moves";
@@ -44,7 +45,7 @@ async function fixture() {
       await finishAttach.promise;
     }),
     detach: vi.fn(async () => {}),
-    sendCommand: vi.fn(async () => ({})),
+    sendCommand: vi.fn<CdpDebuggerApi["sendCommand"]>(async () => ({})),
     onEvent: event<[chrome.debugger.Debuggee, string, unknown]>(),
     onDetach: event<[chrome.debugger.Debuggee, string]>(),
   };
@@ -131,6 +132,19 @@ async function fixture() {
           signal.signal,
         ),
     );
+  const readSnapshot = () =>
+    cooperation.run(
+      { id: "read", method: "tool.snapshot", params: { session_id: "one", tab_id: 7 } },
+      cdp,
+      signal.signal,
+      (wrapped) =>
+        handleSnapshot(
+          manager,
+          { session_id: "one", tab_id: 7 },
+          { cdp: wrapped, tabsApi },
+          signal.signal,
+        ),
+    );
   const moveOut = () => {
     tabEvents.onDetached.emit(7, { oldWindowId: 10, oldPosition: 0 });
     tabEvents.onAttached.emit(7, { newWindowId: 30, newPosition: 0 });
@@ -142,7 +156,18 @@ async function fixture() {
     await cdp.detachAll();
     cdp.dispose();
   };
-  return { api, cdp, manager, attaching, finishAttach, cleanups, readConsole, moveOut, dispose };
+  return {
+    api,
+    cdp,
+    manager,
+    attaching,
+    finishAttach,
+    cleanups,
+    readConsole,
+    readSnapshot,
+    moveOut,
+    dispose,
+  };
 }
 
 describe("released task CDP attachments", () => {
@@ -200,6 +225,97 @@ describe("released task CDP attachments", () => {
       await f.cdp.releaseSessionTab("other", 7);
       expect(f.cdp.isAttached(7)).toBe(false);
       expect(f.api.detach).toHaveBeenCalledExactlyOnceWith({ tabId: 7 });
+    } finally {
+      await f.dispose();
+    }
+  });
+});
+
+async function pendingSnapshot() {
+  const f = await fixture();
+  const readingTree = deferred(),
+    finishTree = deferred();
+  f.finishAttach.resolve();
+  f.api.sendCommand.mockImplementation(async (_target, method) => {
+    if (method === "Page.getFrameTree") {
+      readingTree.resolve();
+      await finishTree.promise;
+      return {
+        frameTree: {
+          frame: { id: "root", url: "https://example.test" },
+          childFrames: [
+            { frame: { id: "child", parentId: "root", url: "https://example.test/frame" } },
+          ],
+        },
+      };
+    }
+    if (method === "DOM.getFrameOwner") return { backendNodeId: 3 };
+    return {};
+  });
+  const result = f.readSnapshot();
+  await readingTree.promise;
+  return { ...f, result, finishTree };
+}
+
+describe("released snapshot frame discovery", () => {
+  it("does not reconnect after a late frame-tree reply from a released task", async () => {
+    const f = await pendingSnapshot();
+    try {
+      f.moveOut();
+      await Promise.all(f.cleanups);
+      expect(f.cdp.isAttached(7)).toBe(false);
+      const commandsBeforeReply = f.api.sendCommand.mock.calls.length;
+      f.finishTree.resolve();
+      expect(await f.result).toMatchObject({ code: "cancelled" });
+      expect(f.api.attach).toHaveBeenCalledTimes(1);
+      expect(f.api.detach).toHaveBeenCalledTimes(1);
+      expect(f.cdp.isAttached(7)).toBe(false);
+      expect(f.api.sendCommand).toHaveBeenCalledTimes(commandsBeforeReply);
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("stops the cancelled snapshot while another session retains the same connection", async () => {
+    const f = await pendingSnapshot();
+    try {
+      await f.manager.start("other");
+      f.cdp.trackSessionTab("other", 7);
+      const attachment = f.cdp.getAttachmentId(7);
+      f.moveOut();
+      await Promise.all(f.cleanups);
+      expect(f.cdp.getAttachmentId(7)).toBe(attachment);
+      const commandsBeforeReply = f.api.sendCommand.mock.calls.length;
+      f.finishTree.resolve();
+      expect(await f.result).toMatchObject({ code: "cancelled" });
+      expect(f.api.sendCommand).toHaveBeenCalledTimes(commandsBeforeReply);
+      expect(f.cdp.getAttachmentId(7)).toBe(attachment);
+      expect(f.api.detach).not.toHaveBeenCalled();
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("does not use a replacement connection or fallback when attachment identity changes", async () => {
+    const f = await pendingSnapshot();
+    try {
+      const oldAttachment = f.cdp.getAttachmentId(7);
+      await f.cdp.releaseSessionTab("one", 7);
+      await f.manager.start("other");
+      f.cdp.trackSessionTab("other", 7);
+      await f.cdp.ensureConsoleCapture(7);
+      const replacement = f.cdp.getAttachmentId(7);
+      expect(replacement).not.toBe(oldAttachment);
+      const commandsBeforeReply = f.api.sendCommand.mock.calls.length;
+      f.finishTree.resolve();
+      expect(await f.result).toMatchObject({
+        code: "cdp_failed",
+        message: expect.stringContaining("attachment changed"),
+      });
+      expect(f.api.sendCommand).toHaveBeenCalledTimes(commandsBeforeReply);
+      expect(f.api.attach).toHaveBeenCalledTimes(2);
+      expect(f.api.detach).toHaveBeenCalledTimes(1);
+      expect(f.cdp.getAttachmentId(7)).toBe(replacement);
     } finally {
       await f.dispose();
     }
