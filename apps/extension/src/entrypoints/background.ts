@@ -8,6 +8,7 @@ import { getAuditEnabled } from "@/lib/audit";
 import { attachAuditBridge } from "@/lib/audit-bridge";
 import { ConnectionController } from "@/lib/connection-controller";
 import { watchDaemonConnection } from "@/lib/daemon-connection-preference";
+import { attachDaemonUpgradeNotice } from "@/lib/daemon-upgrade-notice";
 import { startHeartbeat } from "@/lib/heartbeat";
 import {
   getConnectionEnabled,
@@ -131,6 +132,7 @@ export default defineBackground(() => {
   const debug = new DebugManager(sessions, cdp, chrome.tabs, Date.now, new LocalDebugArchive());
   attachDebugBridge(sessions, debug);
   const videoHost = new BrowserVideoHost();
+  let upgradeNotice: ReturnType<typeof attachDaemonUpgradeNotice> | undefined;
   const video = new VideoManager({
     sessions,
     cdp,
@@ -163,9 +165,13 @@ export default defineBackground(() => {
       }
     },
     changed: () => {
-      void chrome.action.setBadgeBackgroundColor({ color: "#dc2626" });
-      void chrome.action.setBadgeText({ text: video.isRecording() ? "REC" : "" });
+      upgradeNotice?.refresh();
     },
+  });
+  upgradeNotice = attachDaemonUpgradeNotice({
+    controller,
+    connectionKey: () => requestedConnection?.key ?? "unavailable",
+    isRecording: () => video.isRecording(),
   });
   attachVideoBridge(video, videoHost, (sessionId) => handleOverlayInterrupt(transport, sessionId));
   chrome.webNavigation.onBeforeNavigate.addListener((details) => {

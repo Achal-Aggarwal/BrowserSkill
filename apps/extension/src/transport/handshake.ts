@@ -5,6 +5,7 @@ import type {
   ProtocolFrame,
   RequestFrame,
   ResponseFrame,
+  RpcError,
 } from "./types";
 
 export const PROTOCOL_VERSION = "1.5";
@@ -50,6 +51,19 @@ export interface HandshakeOutcome {
   result: HandshakeResult;
 }
 
+/** A daemon rejection retains its structured compatibility diagnostics. */
+export class HandshakeRejectedError extends Error {
+  readonly code: RpcError["code"];
+  readonly data: RpcError["data"];
+
+  constructor(error: RpcError) {
+    super(`[handshake] daemon rejected handshake: ${error.code} — ${error.message}`);
+    this.name = "HandshakeRejectedError";
+    this.code = error.code;
+    this.data = error.data;
+  }
+}
+
 function ridToString(): string {
   return `hs-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -60,7 +74,12 @@ function ridToString(): string {
 export function performHandshake(
   transport: Transport,
   input: HandshakeInput,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    /** Runs synchronously before rejection handlers, so an immediate close cannot hide diagnostics. */
+    onRejected?: (error: HandshakeRejectedError) => void;
+  } = {},
 ): Promise<HandshakeOutcome> {
   const id = input.rpcId ?? ridToString();
   const params: HandshakeParams = {
@@ -95,9 +114,9 @@ export function performHandshake(
       cleanup();
       const r = msg as ResponseFrame;
       if ("error" in r) {
-        reject(
-          new Error(`[handshake] daemon rejected handshake: ${r.error.code} — ${r.error.message}`),
-        );
+        const error = new HandshakeRejectedError(r.error);
+        reject(error);
+        options.onRejected?.(error);
         return;
       }
       const result = r.result as HandshakeResult;
