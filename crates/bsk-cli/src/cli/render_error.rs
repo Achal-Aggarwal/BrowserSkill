@@ -303,10 +303,7 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             ),
             exit_code: base.exit_code,
         },
-        (
-            ErrorCode::NotFound | ErrorCode::UserAborted | ErrorCode::Timeout,
-            reason::SESSION_USER_MOVED_TAB,
-        ) => RenderInfo {
+        (_, reason::SESSION_USER_MOVED_TAB) => RenderInfo {
             summary: "the session ended because the user moved a controlled tab out of its Agent Window",
             hint: Some(
                 "all pages were preserved and browser control ended; this session cannot resume. Ask the user before starting a new session or borrowing a page again",
@@ -1110,6 +1107,9 @@ mod tests {
             ErrorCode::UserAborted,
             ErrorCode::NotFound,
             ErrorCode::Timeout,
+            ErrorCode::Cancelled,
+            ErrorCode::CdpFailed,
+            ErrorCode::ProtocolError,
         ] {
             let rendered = info_for_error(
                 code,

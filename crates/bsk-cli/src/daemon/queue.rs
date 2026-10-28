@@ -617,6 +617,35 @@ async fn forward_one(
     sessions: &Arc<SessionRegistry>,
     job: &ToolJob,
 ) -> Result<Value, RpcError> {
+    forward_to_extension(sid, browsers, sessions, job)
+        .await
+        .map_err(|mut error| {
+            // Session termination outlives any tool or cleanup failure. Apply it
+            // after method-specific error shaping so effects and diagnostics survive.
+            if job
+                .inflight
+                .as_deref()
+                .and_then(ToolInflightEntry::cancel_reason)
+                == Some(super::inflight::CancelReason::UserMovedTab)
+            {
+                let data = error.data.get_or_insert_with(|| serde_json::json!({}));
+                if data.is_null() {
+                    *data = serde_json::json!({});
+                } else if !data.is_object() {
+                    *data = serde_json::json!({ "details": data.take() });
+                }
+                data["reason"] = serde_json::json!(crate::rpc_reason::SESSION_USER_MOVED_TAB);
+            }
+            error
+        })
+}
+
+async fn forward_to_extension(
+    sid: &SessionId,
+    browsers: &Arc<BrowserRegistry>,
+    sessions: &Arc<SessionRegistry>,
+    job: &ToolJob,
+) -> Result<Value, RpcError> {
     // Pre-flight: a cancel that landed while this job was still in
     // the per-session channel must short-circuit before any session
     // / browser resolution work, and before any WS frame leaves the
@@ -789,10 +818,7 @@ async fn forward_one(
                     job.inflight.as_deref(),
                     "tool dispatch cancelled after extension cleanup",
                 );
-                error.data = Some(cancelled_input_effect_data(
-                    Some(&resp.body),
-                    job.inflight.as_deref(),
-                ));
+                error.data = Some(input_effect_data(Some(&resp.body)));
                 return Err(error);
             }
             // File transfer commits are irreversible. A late cancel cannot
@@ -844,10 +870,7 @@ async fn forward_one(
                 return Err(RpcError {
                     code: ErrorCode::Timeout,
                     message: format!("tool RPC timed out after {:?}", job.timeout),
-                    data: Some(cancelled_input_effect_data(
-                        Some(&body),
-                        job.inflight.as_deref(),
-                    )),
+                    data: Some(input_effect_data(Some(&body))),
                 });
             }
             ResponseBody::Ok(value)
@@ -903,7 +926,7 @@ async fn forward_one(
                     job.cancel_cleanup_timeout
                 ),
                 data: Some(if is_native_input(&job.method) {
-                    cancelled_input_effect_data(None, job.inflight.as_deref())
+                    input_effect_data(None)
                 } else {
                     serde_json::json!({ "reason": "cancel_cleanup_timeout" })
                 }),
@@ -947,7 +970,7 @@ async fn forward_one(
                         "full-page screenshot timed out and extension cleanup could not be confirmed".into()
                     },
                     data: Some(if is_native_input(&job.method) {
-                        cancelled_input_effect_data(None, job.inflight.as_deref())
+                        input_effect_data(None)
                     } else {
                         serde_json::json!({ "reason": "cancel_cleanup_timeout" })
                     }),
@@ -1101,20 +1124,6 @@ fn input_effect_data(response: Option<&ResponseBody>) -> Value {
         return data.clone();
     }
     serde_json::json!({ "reason": "input_outcome_unknown", "effect_state": "unknown" })
-}
-
-fn cancelled_input_effect_data(
-    response: Option<&ResponseBody>,
-    entry: Option<&ToolInflightEntry>,
-) -> Value {
-    let mut data = input_effect_data(response);
-    // Keep session termination alongside input effects and cleanup diagnostics.
-    if entry.and_then(ToolInflightEntry::cancel_reason)
-        == Some(super::inflight::CancelReason::UserMovedTab)
-    {
-        data["reason"] = serde_json::json!(crate::rpc_reason::SESSION_USER_MOVED_TAB);
-    }
-    data
 }
 
 // Native inputs and full-page screenshots must cancel at the daemon deadline: local
